@@ -93,7 +93,7 @@ struct Edge {
 
 /// A Simple Temporal Network.
 ///
-/// Construction is infallible apart from handle validation and the negation of lower bounds.
+/// Construction only fails on handle validation and checked arithmetic.
 /// Algorithms are read-only and take an explicit [`Budget`].
 #[derive(Debug, Clone, Default)]
 pub struct Stn {
@@ -113,10 +113,14 @@ impl Stn {
     }
 
     /// Adds a time point and returns its handle.
-    pub fn add_time_point(&mut self) -> TimePoint {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Overflow`] if the number of time points would exceed `usize::MAX`.
+    pub fn add_time_point(&mut self) -> Result<TimePoint, Error> {
         let tp = TimePoint(self.time_points);
-        self.time_points += 1;
-        tp
+        self.time_points = self.time_points.checked_add(1).ok_or(Error::Overflow)?;
+        Ok(tp)
     }
 
     /// Number of time points.

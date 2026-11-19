@@ -84,6 +84,7 @@ fn extract_cycle(stn: &Stn, pred: &[Option<usize>], last: usize) -> Result<Negat
     let pred_edge = |v: usize| pred[v].map(|e| &stn.edges[e]).ok_or(Error::Internal);
 
     let mut start = last;
+
     for _ in 0..n {
         start = pred_edge(start)?.from;
     }
@@ -91,6 +92,7 @@ fn extract_cycle(stn: &Stn, pred: &[Option<usize>], last: usize) -> Result<Negat
     let mut edges = Vec::new();
     let mut weight = Ticks::ZERO;
     let mut v = start;
+
     loop {
         let edge = pred_edge(v)?;
         edges.push(edge.source);

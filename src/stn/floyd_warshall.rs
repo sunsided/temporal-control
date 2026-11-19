@@ -32,6 +32,7 @@ pub(super) fn run(stn: &Stn, budget: &Budget, meter: &mut Meter) -> Result<Optio
     let mut dist = initial_matrix(stn, cells)?;
 
     let round_steps = steps(cells)?;
+
     for k in 0..n {
         if is_negative(dist[k * n + k]) {
             return Ok(None);
@@ -66,6 +67,7 @@ fn initial_matrix(stn: &Stn, cells: usize) -> Result<Matrix, Error> {
 
     for edge in &stn.edges {
         let cell = &mut dist[edge.from * n + edge.to];
+
         if cell.is_none_or(|d| edge.weight < d) {
             *cell = Some(edge.weight);
         }
@@ -92,6 +94,7 @@ fn relax_through(dist: &mut Matrix, n: usize, k: usize) -> Result<(), Error> {
 
             let candidate = d_ik.checked_add(d_kj).ok_or(Error::Overflow)?;
             let cell = &mut dist[i * n + j];
+
             if cell.is_none_or(|d| candidate < d) {
                 *cell = Some(candidate);
             }

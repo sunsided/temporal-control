@@ -21,8 +21,8 @@
 //! use temporal_control::{Budget, Stn, Ticks, Verdict};
 //!
 //! let mut stn = Stn::new();
-//! let warmup = stn.add_time_point();
-//! let analysis = stn.add_time_point();
+//! let warmup = stn.add_time_point().expect("fits usize");
+//! let analysis = stn.add_time_point().expect("fits usize");
 //! // 5 <= t_analysis - t_warmup <= 15
 //! stn.add_constraint(warmup, analysis, Some(Ticks(5)), Some(Ticks(15)))
 //!     .expect("time points exist");
@@ -54,7 +54,7 @@ pub use budget::Budget;
 pub use error::Error;
 #[cfg(feature = "alloc")]
 pub use stn::{
-    Bound, ConstraintId, CycleEdge, MinimalNetwork, NegativeCycle, Schedule, Stn, TimePoint,
-    Verdict,
+    Bound, Constraint, ConstraintId, CycleEdge, MinimalNetwork, NegativeCycle, Schedule, Stn,
+    TimePoint, Verdict,
 };
 pub use ticks::Ticks;

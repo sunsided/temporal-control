@@ -19,8 +19,9 @@ impl StnSpec {
     /// Builds the [`Stn`], or returns the first construction error.
     pub fn build(&self) -> Result<Stn, Error> {
         let mut stn = Stn::new();
+
         for _ in 0..self.n {
-            stn.add_time_point();
+            stn.add_time_point()?;
         }
 
         for &(from, to, lo, hi) in &self.constraints {

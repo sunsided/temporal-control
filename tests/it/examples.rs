@@ -6,9 +6,9 @@ use temporal_control::{Bound, Budget, Error, Stn, Ticks, TimePoint, Verdict};
 /// and a deadline on transmit relative to warm-up.
 fn rover(deadline: i64) -> (Stn, [TimePoint; 3]) {
     let mut stn = Stn::new();
-    let warmup = stn.add_time_point();
-    let analysis = stn.add_time_point();
-    let transmit = stn.add_time_point();
+    let warmup = stn.add_time_point().unwrap();
+    let analysis = stn.add_time_point().unwrap();
+    let transmit = stn.add_time_point().unwrap();
     stn.add_constraint(warmup, analysis, Some(Ticks(5)), Some(Ticks(15)))
         .unwrap();
     stn.add_constraint(analysis, transmit, Some(Ticks(10)), Some(Ticks(25)))
@@ -52,8 +52,8 @@ fn rover_inconsistent_explained() {
 #[test]
 fn min_lower_bound_rejected() {
     let mut stn = Stn::new();
-    let a = stn.add_time_point();
-    let b = stn.add_time_point();
+    let a = stn.add_time_point().unwrap();
+    let b = stn.add_time_point().unwrap();
     let result = stn.add_constraint(a, b, Some(Ticks(i64::MIN)), None);
     assert_eq!(result, Err(Error::Overflow));
 }
@@ -62,7 +62,7 @@ fn min_lower_bound_rejected() {
 #[test]
 fn unknown_time_point_rejected() {
     let mut stn = Stn::new();
-    let a = stn.add_time_point();
+    let a = stn.add_time_point().unwrap();
     let result = stn.add_constraint(a, TimePoint(7), None, None);
     assert_eq!(result, Err(Error::UnknownTimePoint));
 }

@@ -72,12 +72,14 @@ observed so far.
 **Dynamic controllability (DC).** An STNU is DC iff there is a dynamic strategy that satisfies
 all requirement constraints in every situation.
 
-**Reaction-time variant.** We adopt the standard STNU semantics of Morris (2014) and Cairo,
-Hunsberger and Rizzi (2018): decisions may depend only on contingent executions observed
-*before* the decision time, i.e. no instantaneous reaction (formalized by Hunsberger 2009).
+**Reaction-time variant.** We intend to adopt the standard STNU semantics: decisions may depend
+only on contingent executions observed *before* the decision time, i.e. no instantaneous
+reaction (Hunsberger 2009; attribution to Morris 2014 and Cairo, Hunsberger and Rizzi 2018 is
+**unverified**).
 Variants with instantaneous reaction or bounded reaction time `ε` exist for CSTNs; they are out
 of scope. *Open question:* confirm that the CSTNU-Tool STNU checker uses the same variant before
-differential testing; otherwise mismatches will be spurious.
+differential testing; otherwise mismatches will be spurious. With integer ticks the variant is observable (react at
+`t` or at `t + 1`), so it must be fixed before milestone 2.
 
 ### 3.3 Dispatchable networks and execution *(planned, milestone 3)*
 
@@ -103,7 +105,7 @@ contingent bounds (an assumption violation, which the executive must handle).
 | STN minimal network | Floyd-Warshall with early negative-diagonal stop | `O(n^3)` time, `n^2` cells | done |
 | STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) or P³C (Planken, de Weerdt and van der Krogt 2008) | `O(n m + n^2 log n)` | later, only if needed |
 | STNU DC check | Morris 2014 `O(n^3)` cubic algorithm | `O(n^3)` | milestone 2 |
-| STNU DC check, faster | RUL⁻ (Cairo, Hunsberger and Rizzi 2018), sped up by Hunsberger and Posenato (AAAI 2022) | `O(mn + k^2 n + k n log n)` | milestone 2b |
+| STNU DC check, faster | RUL⁻ (Cairo, Hunsberger and Rizzi 2018), sped up by Hunsberger and Posenato (AAAI 2022) | `O(mn + k^2 n + k n log n)` (**unverified**) | milestone 2b |
 | Non-DC explanation | semi-reducible negative cycle (SRN-cycle) extraction, following Bhargava, Vaquero and Williams 2017 and Hunsberger/Posenato | — | milestone 2 |
 | Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | milestone 3 |
 
@@ -149,8 +151,10 @@ optional bounded *incremental* re-check (for replanning after a reset) is a late
 - Every algorithm takes a `Budget { max_steps, max_cells }`.
   - A *step* is one edge relaxation (Bellman-Ford) or one matrix-cell update (Floyd-Warshall).
   - `max_cells` bounds the largest matrix allocation; the check happens before allocating, and
-    the allocation itself uses `try_reserve_exact`, so allocator failure is `Error::OutOfMemory`
-    and not an abort.
+    the Floyd-Warshall matrix uses `try_reserve_exact`, so its allocation failure is
+    `Error::OutOfMemory` and not an abort. *Gap:* the `O(n + m)` allocations (Bellman-Ford
+    state, the cycle vector, `Stn` construction) are not yet budgeted and abort on allocator
+    failure; switch them to `try_reserve` before any onboard use of the `alloc` parts.
 - Exhaustion returns `Error::BudgetExhausted` or `Error::MemoryBudgetExceeded`. It never
   returns a partial or guessed verdict. Property test: for any budget, the result is either a
   budget error or identical to the unlimited result.
@@ -190,7 +194,7 @@ IDs so ground tools can render it and the CSTNU-Tool comparison can match it str
 | --- | --- | --- |
 | Example tests | Hand-written networks with known answers (rover example) | done |
 | Property tests (proptest) | BF and FW agree; schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
-| Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's GraphML format in a dev-only tool | milestone 2 |
+| Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | milestone 2 |
 | Differential (internal) | Morris cubic vs RUL⁻ on the same STNUs; STNU with degenerate contingent links vs STN code | milestone 2 |
 | Fuzzing | `cargo fuzz` targets for construction, the checks, and the onboard decoder/validator (must reject, never panic) | milestone 2 (decoder: milestone 3) |
 | Model checking | Kani harnesses for the dispatcher step function and the decoder on small fixed capacities: no panic, no overflow, windows respected | milestone 3 |
