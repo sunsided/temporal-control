@@ -11,7 +11,16 @@ readme = "README.md"
 keywords = ["stnu", "scheduling", "temporal", "spacecraft", "planning"]
 categories = ["aerospace", "algorithms", "no-std"]
 
+[features]
+default = ["alloc"]
+## Ground-side algorithms that need a heap: STN construction, consistency
+## checking and minimal networks.
+alloc = []
+
 [dependencies]
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [lints.rust]
 missing_docs = "warn"

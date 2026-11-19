@@ -12,7 +12,7 @@ Simple temporal networks with uncertainty: dynamic controllability checking and 
 
 ## Status
 
-Pre-release. Version 0.0.0 reserves the name; the API is not started yet and will change.
+Pre-release (0.0.0). Milestone 1 (STN construction, consistency checking with negative-cycle explanations, minimal networks, budgets) is implemented on `draft/initial`; the API will change. See [docs/design.md](docs/design.md).
 
 ## License
 
