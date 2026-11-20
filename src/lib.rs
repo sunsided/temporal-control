@@ -6,7 +6,7 @@
 //! ## Scope
 //!
 //! - Simple Temporal Networks ([`Stn`]): consistency checking with a negative-cycle explanation,
-//!   minimal networks, incremental consistency ([`IncrementalStn`]) and minimal dispatchable
+//!   minimal networks, incremental consistency ([`IncrementalStn`]) and filtered dispatchable
 //!   networks ([`Stn::dispatchable`]).
 //! - STNs with Uncertainty ([`Stnu`]): dynamic controllability by two independent checkers
 //!   ([`Stnu::dispatchable`], which also yields an extended dispatchable network with waits,

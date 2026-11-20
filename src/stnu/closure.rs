@@ -44,6 +44,10 @@ struct Labelled {
     w: Vec<Option<Ticks>>,
     /// Scratch `n * n` matrix for the all-max projection.
     scratch: Vec<Option<Ticks>>,
+    /// Copy of `d` from the start of the round, to detect a fixpoint.
+    prev_d: Vec<Option<Ticks>>,
+    /// Copy of `w` from the start of the round, to detect a fixpoint.
+    prev_w: Vec<Option<Ticks>>,
 }
 
 /// Runs the closure and builds the extended dispatchable network.
@@ -82,8 +86,8 @@ impl Labelled {
         let nn = n.checked_mul(n).ok_or(Error::MemoryBudgetExceeded)?;
         let nk = n.checked_mul(k).ok_or(Error::MemoryBudgetExceeded)?;
         let cells = nn
-            .checked_mul(2)
-            .and_then(|c| c.checked_add(nk))
+            .checked_mul(3)
+            .and_then(|c| c.checked_add(nk.checked_mul(2)?))
             .ok_or(Error::MemoryBudgetExceeded)?;
         budget.check_cells(cells)?;
         meter.spend(steps(cells)?)?;
@@ -94,6 +98,8 @@ impl Labelled {
             d: matrix(nn)?,
             w: matrix(nk)?,
             scratch: matrix(nn)?,
+            prev_d: matrix(nn)?,
+            prev_w: matrix(nk)?,
         };
 
         g.load(stnu)?;
@@ -148,8 +154,8 @@ impl Labelled {
     ///
     /// [`Error::BudgetExhausted`] or [`Error::Overflow`].
     fn round(&mut self, stnu: &Stnu, meter: &mut Meter) -> Result<Option<bool>, Error> {
-        let before_d = self.d.clone();
-        let before_w = self.w.clone();
+        self.prev_d.copy_from_slice(&self.d);
+        self.prev_w.copy_from_slice(&self.w);
 
         if !self.close_ordinary(meter)? {
             return Ok(None);
@@ -164,7 +170,7 @@ impl Labelled {
             return Ok(None);
         }
 
-        Ok(Some(self.d != before_d || self.w != before_w))
+        Ok(Some(self.d != self.prev_d || self.w != self.prev_w))
     }
 
     /// Floyd-Warshall on `D`; returns false on a negative diagonal entry.

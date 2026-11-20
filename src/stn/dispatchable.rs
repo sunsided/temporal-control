@@ -1,4 +1,7 @@
-//! Minimal dispatchable STNs by dominated-edge filtering (Muscettola, Morris and Tsamardinos 1998).
+//! Dispatchable STNs by dominated-edge filtering (Muscettola, Morris and Tsamardinos 1998).
+//!
+//! The result is the minimal dispatchable network, except that points at offset zero from
+//! their rigid-component leader carry copies of the leader's edges (see step 1).
 //!
 //! The minimal network (all-pairs shortest paths) is dispatchable but dense. Filtering keeps a
 //! subset of its edges that is still dispatchable:
@@ -32,7 +35,7 @@ use crate::dispatch::{DispatchEdge, DispatchableNetwork, PointKind};
 use crate::{Budget, Error, Ticks};
 
 impl MinimalNetwork {
-    /// Derives the minimal dispatchable network by dominated-edge filtering.
+    /// Derives a dispatchable network by dominated-edge filtering.
     ///
     /// The result is equivalent to this network (same all-pairs distances) and dispatchable by
     /// a [`Dispatcher`](crate::Dispatcher).

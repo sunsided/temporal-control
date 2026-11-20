@@ -101,7 +101,8 @@ tested), so a next-tick checker would be the conservative choice; it is an open 
 A network is *dispatchable* if a greedy dispatcher that only propagates to immediate neighbors
 never violates a constraint (Muscettola, Morris and Tsamardinos 1998).
 
-**STN.** `MinimalNetwork::dispatchable` filters the minimal network. Rigid components
+**STN.** `MinimalNetwork::dispatchable` filters the minimal network (the result is minimal
+except for the edge copies on simultaneous points described below). Rigid components
 (`D[i][j] + D[j][i] = 0`) get a leader, their earliest member (lowest index on ties); members are
 tied to it by two edges. Among leaders, a non-negative edge `A -> C` is dropped if a
 non-negative `B -> C` has `D[A][B] + D[B][C] = D[A][C]`, a negative `A -> C` if a negative
@@ -188,7 +189,12 @@ optional bounded *incremental* re-check (for replanning after a reset) is a late
     the Floyd-Warshall matrix uses `try_reserve_exact`, so its allocation failure is
     `Error::OutOfMemory` and not an abort. *Gap:* the `O(n + m)` allocations (Bellman-Ford
     state, the cycle vector, `Stn` construction) are not yet budgeted and abort on allocator
-    failure; switch them to `try_reserve` before any onboard use of the `alloc` parts.
+    failure; switch them to `try_reserve` before any onboard use of the `alloc` parts. The
+    same holds for `Stnu::check_controllability` (adjacency lists and up to `n^2` derived
+    edges, not checked against `max_cells`). The `IncrementalStn` working copy of its matrix
+    is fallible but not counted in `max_cells`, so the peak is twice the counted `n^2`. `Stn::dispatchable` and the rejection explanation of
+    `IncrementalStn::add_constraint` meter each phase against the full budget, so they can
+    spend up to twice `max_steps`.
 - Exhaustion returns `Error::BudgetExhausted` or `Error::MemoryBudgetExceeded`. It never
   returns a partial or guessed verdict. Property test: for any budget, the result is either a
   budget error or identical to the unlimited result.

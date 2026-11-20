@@ -173,6 +173,26 @@ impl Stnu {
     /// when only the verdict is needed: it keeps `O(n + m)` memory plus derived edges instead
     /// of dense matrices. See the `backprop` module docs for the cost.
     ///
+    /// shortcut: [`Budget::max_cells`] is not applied here, and its allocations (adjacency
+    /// lists, up to `n^2` derived edges, the queue) abort on allocator failure; bound them
+    /// before running this onboard.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use temporal_control::{Budget, Controllability, Stnu, Ticks};
+    ///
+    /// // X must precede the end of a [1, 10] activity by 1..2 ticks: impossible to schedule.
+    /// let mut stnu = Stnu::new();
+    /// let a = stnu.add_time_point().expect("fits");
+    /// let c = stnu.add_contingent_link(a, Ticks(1), Ticks(10)).expect("valid");
+    /// let x = stnu.add_time_point().expect("fits");
+    /// stnu.add_constraint(x, c, Some(Ticks(1)), Some(Ticks(2))).expect("exists");
+    ///
+    /// let verdict = stnu.check_controllability(&Budget::UNLIMITED).expect("within budget");
+    /// assert_eq!(verdict, Controllability::Uncontrollable);
+    /// ```
+    ///
     /// # Errors
     ///
     /// - [`Error::BudgetExhausted`] if the step budget runs out.
@@ -189,10 +209,11 @@ impl Stnu {
     /// result keeps every ordinary edge and every *wait* (upper-case edge) that is tighter than
     /// the ordinary edge in parallel, which a [`Dispatcher`](crate::Dispatcher) executes.
     ///
-    /// Each round costs `O(n^3 + n^2 k)` steps and `2 n^2 + n k` cells for `n` points and `k`
-    /// links. shortcut: no polynomial bound on the number of rounds is proven here; values only
-    /// decrease, so rounds are finite, and the [`Budget`] bounds them. Upgrade to the
-    /// Hunsberger-Posenato `FD_STNU` algorithm if a proven bound matters.
+    /// Each round costs `O(n^3 + n^2 k)` steps; the matrices take `3 n^2 + 2 n k` cells for `n`
+    /// points and `k` links, all checked against [`Budget::max_cells`] up front. shortcut:
+    /// termination and the number of rounds are not proven here (the tests only show agreement
+    /// with a brute-force oracle on small networks); the [`Budget`] bounds the work. Upgrade to
+    /// the Hunsberger-Posenato `FD_STNU` algorithm if a proven bound matters.
     ///
     /// # Errors
     ///

@@ -11,7 +11,7 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | STN consistency (Bellman-Ford) with negative-cycle explanation | done |
 | STN minimal network (Floyd-Warshall) | done |
 | Incremental STN consistency, `O(n^2)` per constraint | done |
-| Minimal dispatchable STN (dominated-edge filtering) | done |
+| Dispatchable STN by dominated-edge filtering (minimal except for edge copies on simultaneous points) | done |
 | STNU dynamic controllability: labelled closure with extended dispatchable network | done |
 | STNU dynamic controllability: Morris backpropagation (second checker) | done |
 | Onboard dispatcher, `no_std` without `alloc`, fixed capacity | done |

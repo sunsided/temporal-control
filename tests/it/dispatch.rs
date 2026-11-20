@@ -3,7 +3,7 @@
 use proptest::prelude::*;
 use temporal_control::{
     Budget, DispatchEdge, DispatchError, DispatchableNetwork, Dispatcher, PointKind, Stn, Ticks,
-    TimePoint, Verdict,
+    TimePoint, Verdict, Wait,
 };
 
 use crate::generators::any_stn;
@@ -197,5 +197,125 @@ fn zero_weight_dominance_does_not_deadlock() {
     for seed in 1..200 {
         let times = sim::run(&net, Agent::Random, Nature::Random, &mut Rng(seed));
         sim::assert_satisfies(&stn, &times);
+    }
+}
+
+/// A contingent point with the given activation and bounds.
+fn contingent(activation: usize, lo: i64, hi: i64) -> PointKind {
+    PointKind::Contingent {
+        activation: TimePoint(activation),
+        lo: Ticks(lo),
+        hi: Ticks(hi),
+    }
+}
+
+/// Every malformed-network branch of the validator is rejected.
+#[test]
+fn validator_rejects_malformed_networks() {
+    let exec = PointKind::Executable;
+    let edge = |from, to, weight| DispatchEdge {
+        from: TimePoint(from),
+        to: TimePoint(to),
+        weight: Ticks(weight),
+    };
+    let wait = |waiter, contingent| Wait {
+        waiter: TimePoint(waiter),
+        contingent: TimePoint(contingent),
+        delay: Ticks(1),
+    };
+    let cases: [(&[PointKind], &[DispatchEdge], &[Wait]); 7] = [
+        (&[exec, contingent(0, 0, 3)], &[], &[]),
+        (&[exec, contingent(0, 4, 3)], &[], &[]),
+        (&[contingent(1, 1, 3), contingent(0, 1, 3)], &[], &[]),
+        (&[exec, contingent(7, 1, 3)], &[], &[]),
+        (&[exec, exec], &[edge(1, 1, -1)], &[]),
+        (&[exec, contingent(0, 1, 3)], &[], &[wait(1, 1)]),
+        (&[exec, exec], &[], &[wait(0, 1)]),
+    ];
+
+    for (points, edges, waits) in cases {
+        assert_eq!(
+            Dispatcher::<4, 8>::new(points, edges, waits).err(),
+            Some(DispatchError::InvalidNetwork),
+            "{points:?} {edges:?} {waits:?}"
+        );
+    }
+}
+
+/// One arbitrary dispatcher call.
+#[derive(Debug, Clone)]
+enum Call {
+    /// [`Dispatcher::observe`].
+    Observe(usize, i64),
+    /// [`Dispatcher::execute`].
+    Execute(usize, i64),
+    /// [`Dispatcher::step`] with one observation.
+    Step(usize, i64),
+    /// [`Dispatcher::check_deadlines`].
+    Deadlines(i64),
+}
+
+/// Extreme and small tick values.
+fn any_tick() -> impl Strategy<Value = i64> {
+    prop_oneof![
+        Just(i64::MIN),
+        Just(i64::MAX),
+        Just(i64::MIN + 1),
+        Just(i64::MAX - 1),
+        -20i64..=20,
+    ]
+}
+
+proptest! {
+    /// Arbitrary, possibly malformed networks and call sequences never panic.
+    #[test]
+    fn dispatcher_never_panics(
+        kinds in proptest::collection::vec((any::<bool>(), 0usize..6, any_tick(), any_tick()), 0..6),
+        edges in proptest::collection::vec((0usize..7, 0usize..7, any_tick()), 0..10),
+        waits in proptest::collection::vec((0usize..7, 0usize..7, any_tick()), 0..4),
+        calls in proptest::collection::vec(
+            prop_oneof![
+                (0usize..7, any_tick()).prop_map(|(p, t)| Call::Observe(p, t)),
+                (0usize..7, any_tick()).prop_map(|(p, t)| Call::Execute(p, t)),
+                (0usize..7, any_tick()).prop_map(|(p, t)| Call::Step(p, t)),
+                any_tick().prop_map(Call::Deadlines),
+            ],
+            0..20,
+        ),
+    ) {
+        let points: Vec<PointKind> = kinds
+            .iter()
+            .map(|&(exec, a, lo, hi)| {
+                if exec {
+                    PointKind::Executable
+                } else {
+                    PointKind::Contingent { activation: TimePoint(a), lo: Ticks(lo), hi: Ticks(hi) }
+                }
+            })
+            .collect();
+        let edges: Vec<DispatchEdge> = edges
+            .iter()
+            .map(|&(f, t, w)| DispatchEdge { from: TimePoint(f), to: TimePoint(t), weight: Ticks(w) })
+            .collect();
+        let waits: Vec<Wait> = waits
+            .iter()
+            .map(|&(x, c, d)| Wait { waiter: TimePoint(x), contingent: TimePoint(c), delay: Ticks(d) })
+            .collect();
+
+        let Ok(mut d) = Dispatcher::<6, 24>::new(&points, &edges, &waits) else {
+            return Ok(());
+        };
+
+        let mut out = [TimePoint(0); 6];
+
+        for call in calls {
+            let _ = match call {
+                Call::Observe(p, t) => d.observe(TimePoint(p), Ticks(t)),
+                Call::Execute(p, t) => d.execute(TimePoint(p), Ticks(t)),
+                Call::Step(p, t) => d.step(Ticks(t), &[TimePoint(p)], &mut out).map(|_| ()),
+                Call::Deadlines(t) => d.check_deadlines(Ticks(t)),
+            };
+            let _ = (d.next_wakeup(), d.is_complete(), d.window(TimePoint(0)), d.time(TimePoint(0)));
+        }
     }
 }

@@ -220,7 +220,7 @@ impl Stn {
         }
     }
 
-    /// Computes the minimal network and filters it into a minimal dispatchable network.
+    /// Computes the minimal network and filters it into a dispatchable network.
     ///
     /// Costs `O(n^3)` steps and `n^2` cells. See [`MinimalNetwork::dispatchable`].
     ///
@@ -228,6 +228,28 @@ impl Stn {
     ///
     /// As for [`Stn::minimal_network`] and [`MinimalNetwork::dispatchable`]. Each phase is
     /// metered against the full `budget`, so the total can reach twice its step limit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use temporal_control::{Budget, Dispatcher, Stn, Ticks, TimePoint, Verdict};
+    ///
+    /// // A chain a -> b -> c, each step 2..5 ticks: the implied a -> c edges are filtered out.
+    /// let mut stn = Stn::new();
+    /// let [a, b, c] = [(); 3].map(|()| stn.add_time_point().expect("fits"));
+    /// stn.add_constraint(a, b, Some(Ticks(2)), Some(Ticks(5))).expect("exists");
+    /// stn.add_constraint(b, c, Some(Ticks(2)), Some(Ticks(5))).expect("exists");
+    ///
+    /// let Verdict::Consistent(net) = stn.dispatchable(&Budget::UNLIMITED).expect("fits") else {
+    ///     panic!("consistent");
+    /// };
+    /// assert_eq!(net.edges().len(), 4);
+    ///
+    /// let mut d: Dispatcher<3, 8> = net.dispatcher().expect("fits");
+    /// let mut out = [TimePoint(0); 3];
+    /// assert_eq!(d.step(Ticks(0), &[], &mut out), Ok(1));
+    /// assert_eq!(d.next_wakeup(), Some(Ticks(2)));
+    /// ```
     pub fn dispatchable(&self, budget: &Budget) -> Result<Verdict<DispatchableNetwork>, Error> {
         match self.minimal_network(budget)? {
             Verdict::Consistent(min) => min.dispatchable(budget).map(Verdict::Consistent),
