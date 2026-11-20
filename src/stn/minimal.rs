@@ -12,10 +12,10 @@ use crate::{Error, Ticks};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MinimalNetwork {
     /// Number of time points.
-    n: usize,
+    pub(super) n: usize,
     /// Row-major `n * n` shortest-path distances; `None` means unbounded. No entry is
     /// `i64::MIN`, so every entry can be negated.
-    dist: Vec<Option<Ticks>>,
+    pub(super) dist: Vec<Option<Ticks>>,
 }
 
 impl MinimalNetwork {

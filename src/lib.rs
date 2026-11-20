@@ -45,16 +45,22 @@
 extern crate alloc;
 
 mod budget;
+pub mod dispatch;
 mod error;
 #[cfg(feature = "alloc")]
 pub mod stn;
 mod ticks;
+mod time_point;
 
 pub use budget::Budget;
+#[cfg(feature = "alloc")]
+pub use dispatch::DispatchableNetwork;
+pub use dispatch::{DispatchEdge, DispatchError, Dispatcher, PointKind, Wait};
 pub use error::Error;
 #[cfg(feature = "alloc")]
 pub use stn::{
     Bound, Constraint, ConstraintId, CycleEdge, IncrementalStn, MinimalNetwork, NegativeCycle,
-    Schedule, Stn, TimePoint, Verdict,
+    Schedule, Stn, Verdict,
 };
 pub use ticks::Ticks;
+pub use time_point::TimePoint;

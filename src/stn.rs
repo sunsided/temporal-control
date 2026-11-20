@@ -13,6 +13,7 @@
 //! ```
 
 mod bellman_ford;
+mod dispatchable;
 mod explanation;
 mod floyd_warshall;
 mod incremental;
@@ -20,17 +21,13 @@ mod minimal;
 
 use alloc::vec::Vec;
 
+pub use crate::TimePoint;
+use crate::dispatch::DispatchableNetwork;
 use crate::{Budget, Error, Ticks};
 
 pub use explanation::{Bound, CycleEdge, NegativeCycle};
 pub use incremental::IncrementalStn;
 pub use minimal::MinimalNetwork;
-
-/// Handle of a time point inside one [`Stn`].
-///
-/// Handles are dense indices starting at zero, in creation order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TimePoint(pub usize);
 
 /// Handle of a constraint inside one [`Stn`], in insertion order starting at zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -220,6 +217,21 @@ impl Stn {
         match bellman_ford::run(self, &mut meter)? {
             Verdict::Inconsistent(cycle) => Ok(Verdict::Inconsistent(cycle)),
             Verdict::Consistent(_) => Err(Error::Internal),
+        }
+    }
+
+    /// Computes the minimal network and filters it into a minimal dispatchable network.
+    ///
+    /// Costs `O(n^3)` steps and `n^2` cells. See [`MinimalNetwork::dispatchable`].
+    ///
+    /// # Errors
+    ///
+    /// As for [`Stn::minimal_network`] and [`MinimalNetwork::dispatchable`]. Each phase is
+    /// metered against the full `budget`, so the total can reach twice its step limit.
+    pub fn dispatchable(&self, budget: &Budget) -> Result<Verdict<DispatchableNetwork>, Error> {
+        match self.minimal_network(budget)? {
+            Verdict::Consistent(min) => min.dispatchable(budget).map(Verdict::Consistent),
+            Verdict::Inconsistent(cycle) => Ok(Verdict::Inconsistent(cycle)),
         }
     }
 
