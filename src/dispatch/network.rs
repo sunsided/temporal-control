@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use super::{DispatchEdge, DispatchError, Dispatcher, PointKind, Wait};
+use super::{DispatchEdge, DispatchError, Dispatcher, Index, PointKind, Wait};
 
 /// A dispatchable network produced on the ground, ready to load into a [`Dispatcher`].
 ///
@@ -52,14 +52,19 @@ impl DispatchableNetwork {
         2 * self.edges.len() + self.waits.len()
     }
 
-    /// Loads this network into a fixed-capacity dispatcher.
+    /// Loads this network into a new fixed-capacity dispatcher.
+    ///
+    /// The index type `I` is usually inferred from the annotated result type, e.g.
+    /// `let d: Dispatcher<8, 64> = net.dispatcher()?` (with the default `usize`) or
+    /// `Dispatcher<8, 64, u16>`. To load into an existing dispatcher in place, use
+    /// [`Dispatcher::load`] with [`Self::points`], [`Self::edges`] and [`Self::waits`].
     ///
     /// # Errors
     ///
-    /// As for [`Dispatcher::new`].
-    pub fn dispatcher<const N: usize, const E: usize>(
+    /// As for [`Dispatcher::load`].
+    pub fn dispatcher<const N: usize, const E: usize, I: Index>(
         &self,
-    ) -> Result<Dispatcher<N, E>, DispatchError> {
+    ) -> Result<Dispatcher<N, E, I>, DispatchError> {
         Dispatcher::new(&self.points, &self.edges, &self.waits)
     }
 }

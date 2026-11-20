@@ -41,8 +41,10 @@
 //!
 //! [`Dispatcher`] has fixed capacities: `N` time points and `E` adjacency entries. Every edge
 //! takes two entries (one per endpoint) and every wait one. Work per event is `O(degree)`;
-//! [`Dispatcher::step`] is `O(N * degree)` per executed point.
+//! [`Dispatcher::step`] is `O(N * degree)` per executed point. Internal handles are stored in
+//! an [`Index`] type (`usize` by default, or `u16`/`u32`).
 
+mod index;
 #[cfg(feature = "alloc")]
 mod network;
 
@@ -50,6 +52,7 @@ use core::fmt;
 
 use crate::{Ticks, TimePoint};
 
+pub use index::Index;
 #[cfg(feature = "alloc")]
 pub use network::DispatchableNetwork;
 
@@ -100,6 +103,9 @@ pub struct Wait {
 pub enum DispatchError {
     /// The network needs more than `N` points or `E` entries.
     CapacityExceeded,
+    /// The network has more points or entries than the dispatcher's [`Index`] type can
+    /// address.
+    IndexTypeTooSmall,
     /// The network is malformed: a bad index, a contingent link with `lo <= 0` or `lo > hi`, a
     /// cyclic activation chain, a negative self-loop, or a wait on a non-contingent point.
     InvalidNetwork,
@@ -129,6 +135,7 @@ impl fmt::Display for DispatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CapacityExceeded => f.write_str("dispatcher capacity exceeded"),
+            Self::IndexTypeTooSmall => f.write_str("network too large for the index type"),
             Self::InvalidNetwork => f.write_str("malformed dispatchable network"),
             Self::UnknownTimePoint => f.write_str("unknown time point or wrong kind"),
             Self::TimeWentBackwards => f.write_str("time went backwards"),
@@ -147,35 +154,87 @@ impl fmt::Display for DispatchError {
 
 impl core::error::Error for DispatchError {}
 
+/// Kind of a loaded point, with the activation stored as an [`Index`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind<I> {
+    /// See [`PointKind::Executable`].
+    Executable,
+    /// See [`PointKind::Contingent`].
+    Contingent {
+        /// The time point that starts the contingent duration.
+        activation: I,
+        /// Shortest duration.
+        lo: Ticks,
+        /// Longest duration.
+        hi: Ticks,
+    },
+}
+
+impl<I: Index> Kind<I> {
+    /// Narrows a validated [`PointKind`].
+    ///
+    /// # Errors
+    ///
+    /// [`DispatchError::IndexTypeTooSmall`] if the activation does not fit `I`.
+    fn narrow(kind: PointKind) -> Result<Self, DispatchError> {
+        Ok(match kind {
+            PointKind::Executable => Self::Executable,
+            PointKind::Contingent { activation, lo, hi } => Self::Contingent {
+                activation: index(activation.0)?,
+                lo,
+                hi,
+            },
+        })
+    }
+
+    /// Widens back to the public [`PointKind`].
+    fn widen(self) -> PointKind {
+        match self {
+            Self::Executable => PointKind::Executable,
+            Self::Contingent { activation, lo, hi } => PointKind::Contingent {
+                activation: TimePoint(activation.to_usize()),
+                lo,
+                hi,
+            },
+        }
+    }
+
+    /// Whether this is an executable point.
+    const fn is_executable(self) -> bool {
+        matches!(self, Self::Executable)
+    }
+}
+
 /// One adjacency entry, owned by one time point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Entry {
+enum Entry<I> {
     /// Unused slot.
     Empty,
     /// When the owner happens at `t`: `ub[target] <= t + weight`.
     Upper {
         /// The point whose upper bound tightens.
-        target: usize,
+        target: I,
         /// Edge weight.
         weight: Ticks,
     },
     /// When the owner happens at `t`: `lb[target] >= t - weight`.
     Lower {
         /// The point whose lower bound tightens.
-        target: usize,
+        target: I,
         /// Weight of the edge `target -> owner`.
         weight: Ticks,
     },
     /// The owner waits for `contingent` until `activation + delay`.
     Wait {
         /// The contingent point waited for.
-        contingent: usize,
+        contingent: I,
         /// Wait length after activation.
         delay: Ticks,
     },
 }
 
-/// Fixed-capacity online dispatcher for up to `N` time points and `E` adjacency entries.
+/// Fixed-capacity online dispatcher for up to `N` time points and `E` adjacency entries,
+/// storing internal handles as `I` (see [`Index`]).
 ///
 /// # Examples
 ///
@@ -197,11 +256,11 @@ enum Entry {
 /// assert!(d.is_complete());
 /// ```
 #[derive(Debug, Clone)]
-pub struct Dispatcher<const N: usize, const E: usize> {
+pub struct Dispatcher<const N: usize, const E: usize, I: Index = usize> {
     /// Number of time points in use.
     n: usize,
     /// Kind of each point.
-    kinds: [PointKind; N],
+    kinds: [Kind<I>; N],
     /// Lower window bound per point; `None` is `-infinity`.
     lb: [Option<Ticks>; N],
     /// Upper window bound per point; `None` is `+infinity`.
@@ -209,18 +268,18 @@ pub struct Dispatcher<const N: usize, const E: usize> {
     /// Time each point happened, `None` until it happens.
     time: [Option<Ticks>; N],
     /// Per point: outgoing precedence edges whose head has not happened yet.
-    pending: [usize; N],
+    pending: [I; N],
     /// Start of each point's entries in `entries`; the end is the next point's start.
-    start: [usize; N],
+    start: [I; N],
     /// Number of entries in use.
     m: usize,
     /// Adjacency entries grouped by owner.
-    entries: [Entry; E],
+    entries: [Entry<I>; E],
     /// Latest time passed to any call; `None` before the first call.
     now: Option<Ticks>,
 }
 
-impl<const N: usize, const E: usize> Dispatcher<N, E> {
+impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
     /// A dispatcher with no network loaded, usable in `const` and `static` initialisers.
     ///
     /// Flight software typically places the dispatcher in statically allocated memory once
@@ -244,12 +303,12 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
     /// ```
     pub const EMPTY: Self = Self {
         n: 0,
-        kinds: [PointKind::Executable; N],
+        kinds: [Kind::Executable; N],
         lb: [None; N],
         ub: [None; N],
         time: [None; N],
-        pending: [0; N],
-        start: [0; N],
+        pending: [I::ZERO; N],
+        start: [I::ZERO; N],
         m: 0,
         entries: [Entry::Empty; E],
         now: None,
@@ -287,6 +346,8 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
     ///
     /// - [`DispatchError::CapacityExceeded`] if `points.len() > N` or
     ///   `2 * edges.len() + waits.len() > E`.
+    /// - [`DispatchError::IndexTypeTooSmall`] if the point or entry count exceeds the maximum
+    ///   of `I` (see [`Index`]).
     /// - [`DispatchError::InvalidNetwork`] for any malformed input (see its docs).
     pub fn load(
         &mut self,
@@ -294,13 +355,16 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
         edges: &[DispatchEdge],
         waits: &[Wait],
     ) -> Result<(), DispatchError> {
-        validate(points, edges, waits, N, E)?;
+        validate::<I>(points, edges, waits, N, E)?;
 
         self.clear();
-        self.n = points.len();
-        self.kinds[..points.len()].copy_from_slice(points);
-        self.fill_entries(edges, waits);
-        Ok(())
+        let filled = self.fill(points, edges, waits);
+
+        if filled.is_err() {
+            self.clear();
+        }
+
+        filled
     }
 
     /// Records that contingent point `tp` was observed at `now`.
@@ -351,10 +415,10 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
     #[must_use]
     pub fn can_execute(&self, tp: TimePoint, now: Ticks) -> bool {
         tp.0 < self.n
-            && self.kinds[tp.0] == PointKind::Executable
+            && self.kinds[tp.0].is_executable()
             && self.time[tp.0].is_none()
             && self.now.is_none_or(|t| t <= now)
-            && self.pending[tp.0] == 0
+            && self.pending[tp.0] == I::ZERO
             && self.in_window(tp.0, now)
             && self.waits_satisfied(tp.0, now)
     }
@@ -393,18 +457,16 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
             }
 
             let deadline = match self.kinds[p] {
-                PointKind::Executable => self.ub[p],
-                PointKind::Contingent { activation, hi, .. } => {
-                    self.time[activation.0].and_then(|a| a.checked_add(hi))
+                Kind::Executable => self.ub[p],
+                Kind::Contingent { activation, hi, .. } => {
+                    self.time[activation.to_usize()].and_then(|a| a.checked_add(hi))
                 }
             };
 
             if deadline.is_some_and(|d| d < now) {
                 return Err(match self.kinds[p] {
-                    PointKind::Executable => DispatchError::DeadlineMissed(TimePoint(p)),
-                    PointKind::Contingent { .. } => {
-                        DispatchError::ContingentOutOfBounds(TimePoint(p))
-                    }
+                    Kind::Executable => DispatchError::DeadlineMissed(TimePoint(p)),
+                    Kind::Contingent { .. } => DispatchError::ContingentOutOfBounds(TimePoint(p)),
                 });
             }
         }
@@ -456,8 +518,8 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
         let floor = self.now.unwrap_or(Ticks(i64::MIN));
 
         (0..self.n)
-            .filter(|&p| self.kinds[p] == PointKind::Executable && self.time[p].is_none())
-            .filter(|&p| self.pending[p] == 0)
+            .filter(|&p| self.kinds[p].is_executable() && self.time[p].is_none())
+            .filter(|&p| self.pending[p] == I::ZERO)
             .filter_map(|p| self.earliest_start(p, floor))
             .min()
     }
@@ -488,7 +550,7 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
     fn kind(&self, tp: TimePoint) -> Result<PointKind, DispatchError> {
         self.kinds[..self.n]
             .get(tp.0)
-            .copied()
+            .map(|k| k.widen())
             .ok_or(DispatchError::UnknownTimePoint)
     }
 
@@ -524,21 +586,28 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
         self.lb[p].is_none_or(|l| l <= now) && self.ub[p].is_none_or(|u| now <= u)
     }
 
-    /// Entries owned by point `p`.
-    fn entries_of(&self, p: usize) -> &[Entry] {
+    /// Index range in `entries` of the entries owned by point `p`.
+    fn range_of(&self, p: usize) -> core::ops::Range<usize> {
         let end = if p + 1 < self.n {
-            self.start[p + 1]
+            self.start[p + 1].to_usize()
         } else {
             self.m
         };
 
-        &self.entries[self.start[p]..end]
+        self.start[p].to_usize()..end
+    }
+
+    /// Entries owned by point `p`.
+    fn entries_of(&self, p: usize) -> &[Entry<I>] {
+        &self.entries[self.range_of(p)]
     }
 
     /// Whether every wait of `p` is satisfied at `now`.
     fn waits_satisfied(&self, p: usize, now: Ticks) -> bool {
         self.entries_of(p).iter().all(|e| match *e {
-            Entry::Wait { contingent, delay } => self.wait_released(contingent, delay, now),
+            Entry::Wait { contingent, delay } => {
+                self.wait_released(contingent.to_usize(), delay, now)
+            }
             _ => true,
         })
     }
@@ -556,11 +625,11 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
             return Some(Ticks(i64::MIN));
         }
 
-        let PointKind::Contingent { activation, .. } = self.kinds[contingent] else {
+        let Kind::Contingent { activation, .. } = self.kinds[contingent] else {
             return None;
         };
 
-        self.time[activation.0].and_then(|a| a.checked_add(delay))
+        self.time[activation.to_usize()].and_then(|a| a.checked_add(delay))
     }
 
     /// Earliest time `>= floor` at which enabled point `p` could execute, if its window allows.
@@ -569,7 +638,7 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
 
         for e in self.entries_of(p) {
             if let Entry::Wait { contingent, delay } = *e {
-                t = t.max(self.wait_release_time(contingent, delay)?);
+                t = t.max(self.wait_release_time(contingent.to_usize(), delay)?);
             }
         }
 
@@ -594,16 +663,12 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
         self.time[p] = Some(t);
         let mut result = Ok(());
 
-        let end = if p + 1 < self.n {
-            self.start[p + 1]
-        } else {
-            self.m
-        };
-
-        for i in self.start[p]..end {
+        for i in self.range_of(p) {
             let outcome = match self.entries[i] {
-                Entry::Upper { target, weight } => self.tighten_upper(target, t, weight),
-                Entry::Lower { target, weight } => self.tighten_lower(p, target, t, weight),
+                Entry::Upper { target, weight } => self.tighten_upper(target.to_usize(), t, weight),
+                Entry::Lower { target, weight } => {
+                    self.tighten_lower(p, target.to_usize(), t, weight)
+                }
                 Entry::Wait { .. } | Entry::Empty => Ok(()),
             };
 
@@ -661,7 +726,7 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
         weight: Ticks,
     ) -> Result<(), DispatchError> {
         if is_precedence(target, owner, weight) && self.time[target].is_none() {
-            self.pending[target] = self.pending[target].saturating_sub(1);
+            self.pending[target] = self.pending[target].saturating_dec();
         }
 
         let Some(bound) = weight.checked_neg().and_then(|w| t.checked_add(w)) else {
@@ -694,50 +759,93 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
     /// Resets every field to the state of [`Self::EMPTY`], in place.
     fn clear(&mut self) {
         self.n = 0;
-        self.kinds.fill(PointKind::Executable);
+        self.kinds.fill(Kind::Executable);
         self.lb.fill(None);
         self.ub.fill(None);
         self.time.fill(None);
-        self.pending.fill(0);
-        self.start.fill(0);
+        self.pending.fill(I::ZERO);
+        self.start.fill(I::ZERO);
         self.m = 0;
         self.entries.fill(Entry::Empty);
         self.now = None;
     }
 
-    /// Builds the owner-grouped adjacency from validated input and initializes `pending`.
+    /// Fills a cleared dispatcher from a validated network.
     ///
-    /// A counting sort that works inside `start` instead of on temporary arrays: `start[p]`
-    /// first counts `p`'s entries, then becomes the end of `p`'s range, and filling backwards
-    /// moves it to the beginning. Iterating the input in reverse keeps each owner's entries in
-    /// input order (its edge entries in edge order, then its waits), which decides which
-    /// violation [`Self::happen`] reports first.
-    fn fill_entries(&mut self, edges: &[DispatchEdge], waits: &[Wait]) {
+    /// # Errors
+    ///
+    /// [`DispatchError::IndexTypeTooSmall`] if a value does not fit `I`. Validation already
+    /// rules this out; the error replaces what would otherwise be a panic path, and the caller
+    /// clears the half-filled state.
+    fn fill(
+        &mut self,
+        points: &[PointKind],
+        edges: &[DispatchEdge],
+        waits: &[Wait],
+    ) -> Result<(), DispatchError> {
+        for (slot, &kind) in self.kinds.iter_mut().zip(points) {
+            *slot = Kind::narrow(kind)?;
+        }
+
+        self.n = points.len();
+        self.count_entries(edges, waits)?;
+        self.fill_entries(edges, waits)
+    }
+
+    /// Sets `start[p]` to the end of `p`'s entry range, `m` to the entry count, and `pending`
+    /// to the number of precedence edges per point.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::fill`].
+    fn count_entries(
+        &mut self,
+        edges: &[DispatchEdge],
+        waits: &[Wait],
+    ) -> Result<(), DispatchError> {
         for e in edges {
-            self.start[e.from.0] += 1;
-            self.start[e.to.0] += 1;
+            increment(&mut self.start[e.from.0])?;
+            increment(&mut self.start[e.to.0])?;
 
             if is_precedence(e.from.0, e.to.0, e.weight) {
-                self.pending[e.from.0] += 1;
+                increment(&mut self.pending[e.from.0])?;
             }
         }
 
         for w in waits {
-            self.start[w.waiter.0] += 1;
+            increment(&mut self.start[w.waiter.0])?;
         }
 
-        let mut end = 0;
+        let mut end = 0usize;
 
         for p in 0..self.n {
-            end += self.start[p];
-            self.start[p] = end;
+            end += self.start[p].to_usize();
+            self.start[p] = index(end)?;
         }
 
         self.m = end;
+        Ok(())
+    }
 
+    /// Writes the owner-grouped adjacency, moving each `start[p]` from the end to the
+    /// beginning of `p`'s range.
+    ///
+    /// Together with [`Self::count_entries`] this is a counting sort that works inside `start`
+    /// instead of on temporary arrays. Iterating the input in reverse keeps each owner's
+    /// entries in input order (its edge entries in edge order, then its waits), which decides
+    /// which violation [`Self::happen`] reports first.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::fill`].
+    fn fill_entries(
+        &mut self,
+        edges: &[DispatchEdge],
+        waits: &[Wait],
+    ) -> Result<(), DispatchError> {
         for w in waits.iter().rev() {
             let entry = Entry::Wait {
-                contingent: w.contingent.0,
+                contingent: index(w.contingent.0)?,
                 delay: w.delay,
             };
             self.push_back(w.waiter.0, entry);
@@ -745,28 +853,46 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
 
         for e in edges.iter().rev() {
             let (u, v) = (e.from.0, e.to.0);
-            self.push_back(
-                v,
-                Entry::Lower {
-                    target: u,
-                    weight: e.weight,
-                },
-            );
-            self.push_back(
-                u,
-                Entry::Upper {
-                    target: v,
-                    weight: e.weight,
-                },
-            );
+            let lower = Entry::Lower {
+                target: index(u)?,
+                weight: e.weight,
+            };
+            let upper = Entry::Upper {
+                target: index(v)?,
+                weight: e.weight,
+            };
+            self.push_back(v, lower);
+            self.push_back(u, upper);
         }
+
+        Ok(())
     }
 
     /// Writes `entry` just before the current `start[owner]` and moves `start[owner]` there.
-    fn push_back(&mut self, owner: usize, entry: Entry) {
-        self.start[owner] -= 1;
-        self.entries[self.start[owner]] = entry;
+    fn push_back(&mut self, owner: usize, entry: Entry<I>) {
+        let slot = self.start[owner].saturating_dec();
+        self.start[owner] = slot;
+        self.entries[slot.to_usize()] = entry;
     }
+}
+
+/// Converts `value` to the index type.
+///
+/// # Errors
+///
+/// [`DispatchError::IndexTypeTooSmall`] if it does not fit.
+fn index<I: Index>(value: usize) -> Result<I, DispatchError> {
+    I::from_usize(value).ok_or(DispatchError::IndexTypeTooSmall)
+}
+
+/// Adds one to `counter`.
+///
+/// # Errors
+///
+/// [`DispatchError::IndexTypeTooSmall`] if the result does not fit.
+fn increment<I: Index>(counter: &mut I) -> Result<(), DispatchError> {
+    *counter = index(counter.to_usize().saturating_add(1))?;
+    Ok(())
 }
 
 /// Whether edge `from -> to` with `weight` makes `from` wait for `to` (see the module docs).
@@ -787,12 +913,13 @@ fn ok_or_violated(ok: bool, p: usize) -> Result<(), DispatchError> {
     }
 }
 
-/// Validates a dispatchable network against capacities `n_cap` and `e_cap`.
+/// Validates a dispatchable network against capacities `n_cap` and `e_cap` and index type `I`.
 ///
 /// # Errors
 ///
-/// [`DispatchError::CapacityExceeded`] or [`DispatchError::InvalidNetwork`].
-fn validate(
+/// [`DispatchError::CapacityExceeded`], [`DispatchError::IndexTypeTooSmall`] or
+/// [`DispatchError::InvalidNetwork`], checked in that order.
+fn validate<I: Index>(
     points: &[PointKind],
     edges: &[DispatchEdge],
     waits: &[Wait],
@@ -808,6 +935,9 @@ fn validate(
     if points.len() > n_cap || entries > e_cap {
         return Err(DispatchError::CapacityExceeded);
     }
+
+    index::<I>(points.len())?;
+    index::<I>(entries)?;
 
     let n = points.len();
     let valid = points

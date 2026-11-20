@@ -66,7 +66,7 @@ mod time_point;
 pub use budget::Budget;
 #[cfg(feature = "alloc")]
 pub use dispatch::DispatchableNetwork;
-pub use dispatch::{DispatchEdge, DispatchError, Dispatcher, PointKind, Wait};
+pub use dispatch::{DispatchEdge, DispatchError, Dispatcher, Index, PointKind, Wait};
 pub use error::Error;
 #[cfg(feature = "alloc")]
 pub use stn::{

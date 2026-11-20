@@ -376,3 +376,71 @@ fn load_in_place_replaces_or_keeps_state() {
         )
     );
 }
+
+/// Runs `check` on a thread with a stack large enough for dispatchers of `u16::MAX` capacity.
+fn with_big_stack(check: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(check)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// A `u16` dispatcher accepts exactly the networks whose point and entry counts are at most
+/// `u16::MAX`, even when its capacities are larger.
+#[test]
+fn index_type_bounds_network_size() {
+    with_big_stack(|| {
+        const CAP: usize = 1 << 16;
+        let mut d = Dispatcher::<CAP, CAP, u16>::EMPTY;
+        let max = usize::from(u16::MAX);
+
+        assert_eq!(d.load(&vec![PointKind::Executable; max], &[], &[]), Ok(()));
+        assert_eq!(
+            d.load(&vec![PointKind::Executable; max + 1], &[], &[]),
+            Err(DispatchError::IndexTypeTooSmall)
+        );
+
+        let points = [PointKind::Executable, contingent(0, 1, 2)];
+        let edge = DispatchEdge {
+            from: TimePoint(0),
+            to: TimePoint(1),
+            weight: Ticks(5),
+        };
+        let wait = Wait {
+            waiter: TimePoint(0),
+            contingent: TimePoint(1),
+            delay: Ticks(1),
+        };
+        let edges = vec![edge; max / 2];
+        assert_eq!(d.load(&points, &edges, &[wait]), Ok(()));
+        assert_eq!(
+            d.load(&points, &edges, &[wait, wait]),
+            Err(DispatchError::IndexTypeTooSmall)
+        );
+        assert_eq!(
+            d.load(&points, &vec![edge; max / 2 + 1], &[]),
+            Err(DispatchError::IndexTypeTooSmall)
+        );
+    });
+}
+
+proptest! {
+    /// `u16` and `u32` dispatchers make exactly the decisions of the default `usize` one.
+    #[test]
+    fn index_types_dispatch_identically(spec in any_stn(), seed in 1u64..) {
+        let stn = spec.build().unwrap();
+        let Some(net) = dispatchable(&stn) else {
+            return Ok(());
+        };
+
+        for agent in [Agent::Asap, Agent::Random] {
+            let expected = sim::run(&net, agent, Nature::Random, &mut Rng(seed));
+            let mut narrow: Dispatcher<{ sim::N }, { sim::E }, u16> = net.dispatcher().unwrap();
+            let mut mid: Dispatcher<{ sim::N }, { sim::E }, u32> = net.dispatcher().unwrap();
+            prop_assert_eq!(&sim::run_on(&mut narrow, &net, agent, Nature::Random, &mut Rng(seed)), &expected);
+            prop_assert_eq!(&sim::run_on(&mut mid, &net, agent, Nature::Random, &mut Rng(seed)), &expected);
+        }
+    }
+}

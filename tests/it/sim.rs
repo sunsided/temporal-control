@@ -1,6 +1,6 @@
 //! Deterministic simulation of a dispatcher under different agent and nature policies.
 
-use temporal_control::{DispatchableNetwork, Dispatcher, PointKind, Stn, Ticks, TimePoint};
+use temporal_control::{DispatchableNetwork, Dispatcher, Index, PointKind, Stn, Ticks, TimePoint};
 
 /// Point capacity of simulated dispatchers.
 pub const N: usize = 12;
@@ -68,6 +68,22 @@ const END: i64 = 2000;
 /// If the dispatcher reports any error or does not complete.
 pub fn run(net: &DispatchableNetwork, agent: Agent, nature: Nature, rng: &mut Rng) -> Vec<Ticks> {
     let mut d: Dispatcher<N, E> = net.dispatcher().unwrap();
+    run_on(&mut d, net, agent, nature, rng)
+}
+
+/// Runs one simulation on `d`, which must have `net` freshly loaded (by any route: slices, an
+/// encoding, any index type), and returns the time of every point.
+///
+/// # Panics
+///
+/// As for [`run`].
+pub fn run_on<I: Index>(
+    d: &mut Dispatcher<N, E, I>,
+    net: &DispatchableNetwork,
+    agent: Agent,
+    nature: Nature,
+    rng: &mut Rng,
+) -> Vec<Ticks> {
     let mut due: Vec<Option<i64>> = vec![None; net.points().len()];
 
     for t in START..=END {
@@ -87,7 +103,7 @@ pub fn run(net: &DispatchableNetwork, agent: Agent, nature: Nature, rng: &mut Rn
             }
 
             d.check_deadlines(now).unwrap();
-            let executed = act(&mut d, net, agent, now, rng);
+            let executed = act(d, net, agent, now, rng);
             schedule_contingents(net, &executed, t, nature, rng, &mut due);
         }
 
@@ -106,8 +122,8 @@ pub fn run(net: &DispatchableNetwork, agent: Agent, nature: Nature, rng: &mut Rn
 }
 
 /// Lets a non-ASAP agent execute points at `now` until it chooses to stop.
-fn act(
-    d: &mut Dispatcher<N, E>,
+fn act<I: Index>(
+    d: &mut Dispatcher<N, E, I>,
     net: &DispatchableNetwork,
     agent: Agent,
     now: Ticks,
