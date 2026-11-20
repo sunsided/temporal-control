@@ -21,6 +21,15 @@ impl Ticks {
         }
     }
 
+    /// Subtracts `rhs`, returning `None` on overflow.
+    #[must_use]
+    pub const fn checked_sub(self, rhs: Self) -> Option<Self> {
+        match self.0.checked_sub(rhs.0) {
+            Some(v) => Some(Self(v)),
+            None => None,
+        }
+    }
+
     /// Negates a tick value, returning `None` for `i64::MIN`.
     #[must_use]
     pub const fn checked_neg(self) -> Option<Self> {

@@ -83,6 +83,7 @@ fn benches(c: &mut Criterion) {
 
     for (name, algorithm) in [
         ("morris2014_chain_10", DcAlgorithm::Morris2014),
+        ("rul_minus_chain_10", DcAlgorithm::RulMinus),
         ("per_label_backprop_chain_10", DcAlgorithm::PerLabelBackprop),
     ] {
         c.bench_function(name, |b| {

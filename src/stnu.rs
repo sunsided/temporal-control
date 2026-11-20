@@ -20,7 +20,7 @@
 //! graph LR
 //!     stnu["Stnu"] -->|"dispatchable (labelled closure)"| v["Controllable(DispatchableNetwork) or Uncontrollable"]
 //!     stnu -->|"check_controllability (Morris 2014, O(n^3))"| c["Controllable or Uncontrollable"]
-//!     stnu -->|"check_controllability_with (per-label backprop)"| c
+//!     stnu -->|"check_controllability_with (RUL-minus, per-label backprop)"| c
 //!     v --> d["Dispatcher (onboard)"]
 //!     c -->|"Uncontrollable"| e["SemiReducibleCycle"]
 //! ```
@@ -33,6 +33,7 @@ mod backprop;
 mod closure;
 mod explanation;
 mod morris;
+mod rul;
 
 pub use explanation::{LabelledEdge, SemiReducibleCycle};
 
@@ -80,6 +81,10 @@ pub enum DcAlgorithm {
     /// `O(n m + n^3)` time, explains negative verdicts itself.
     #[default]
     Morris2014,
+    /// RUL⁻ (Cairo, Hunsberger and Rizzi 2018): backpropagation from contingent points with a
+    /// potential function, at most `2k` rounds, `O(n m + k (m + k n) log n)`. Fastest on
+    /// sparse networks with few links.
+    RulMinus,
     /// Morris-style backpropagation without normalisation: one propagation per kind of
     /// negative incoming edge, `O(n (k + 1) (m + n^2) log n)`. Kept as an independent
     /// cross-check.
@@ -251,7 +256,7 @@ impl Stnu {
     /// // X within 2 ticks after C: wait for C, then execute.
     /// stnu.add_constraint(c, x, Some(Ticks(0)), Some(Ticks(2))).expect("exists");
     ///
-    /// for algorithm in [DcAlgorithm::Morris2014, DcAlgorithm::PerLabelBackprop] {
+    /// for algorithm in [DcAlgorithm::Morris2014, DcAlgorithm::RulMinus] {
     ///     let verdict = stnu.check_controllability_with(algorithm, &Budget::UNLIMITED);
     ///     assert_eq!(verdict, Ok(Controllability::Controllable(())));
     /// }
@@ -271,6 +276,7 @@ impl Stnu {
     ) -> Result<Controllability<()>, Error> {
         match algorithm {
             DcAlgorithm::Morris2014 => morris::run(self, budget),
+            DcAlgorithm::RulMinus => rul::run(self, budget),
             DcAlgorithm::PerLabelBackprop => backprop::run(self, budget),
         }
     }

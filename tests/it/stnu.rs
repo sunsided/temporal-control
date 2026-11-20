@@ -28,7 +28,11 @@ fn estnu(stnu: &Stnu) -> Option<DispatchableNetwork> {
 }
 
 /// Every checker behind [`Stnu::check_controllability_with`].
-const ALGORITHMS: [DcAlgorithm; 2] = [DcAlgorithm::Morris2014, DcAlgorithm::PerLabelBackprop];
+const ALGORITHMS: [DcAlgorithm; 3] = [
+    DcAlgorithm::Morris2014,
+    DcAlgorithm::RulMinus,
+    DcAlgorithm::PerLabelBackprop,
+];
 
 /// Verdict of `algorithm`. Panics on budget exhaustion or an internal disagreement.
 fn is_dc(stnu: &Stnu, algorithm: DcAlgorithm) -> bool {
@@ -204,6 +208,24 @@ fn no_links_matches_stn() {
     stnu.add_constraint(a, b, Some(Ticks(3)), Some(Ticks(2)))
         .unwrap();
     assert!(estnu(&stnu).is_none());
+}
+
+/// A chain `Z => C1 => C2`, each `[1, 2]`, with `C2 <= Z`: not DC. RUL⁻ needs its activation
+/// points normalised to executable ones to see this.
+#[test]
+fn chained_links_are_checked() {
+    let mut stnu = Stnu::new();
+    let z = stnu.add_time_point().unwrap();
+    let c1 = stnu.add_contingent_link(z, Ticks(1), Ticks(2)).unwrap();
+    let c2 = stnu.add_contingent_link(c1, Ticks(1), Ticks(2)).unwrap();
+    stnu.add_constraint(c2, z, Some(Ticks(0)), None).unwrap();
+
+    for algorithm in ALGORITHMS {
+        assert!(!is_dc(&stnu, algorithm), "{algorithm:?}");
+    }
+
+    let cycle = explanation(&stnu).expect("not DC");
+    assert_cycle_closes(&stnu, &cycle);
 }
 
 /// Invalid contingent bounds are rejected.
