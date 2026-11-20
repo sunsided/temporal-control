@@ -251,8 +251,13 @@ proptest! {
     #[test]
     fn budget_never_changes_verdict(spec in small_stnu(), max_steps in 0u64..5_000) {
         let stnu = spec.build();
-        let limited = stnu.dispatchable(&Budget { max_steps, max_cells: usize::MAX });
+        let budget = Budget { max_steps, max_cells: usize::MAX };
+        let limited = stnu.dispatchable(&budget);
         prop_assert!(limited == Err(Error::BudgetExhausted)
             || limited == stnu.dispatchable(&TEST_BUDGET));
+
+        let limited = stnu.check_controllability(&budget);
+        prop_assert!(limited == Err(Error::BudgetExhausted)
+            || limited == stnu.check_controllability(&TEST_BUDGET));
     }
 }
