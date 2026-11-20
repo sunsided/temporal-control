@@ -1,0 +1,41 @@
+[package]
+name = "temporal-control-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+temporal-control = { path = ".." }
+
+# Standalone: not a member of any workspace.
+[workspace]
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[[bin]]
+name = "decode"
+path = "fuzz_targets/decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dispatch"
+path = "fuzz_targets/dispatch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dc_checkers"
+path = "fuzz_targets/dc_checkers.rs"
+test = false
+doc = false
+bench = false
