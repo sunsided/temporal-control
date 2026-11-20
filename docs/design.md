@@ -84,7 +84,7 @@ This reverses the intent previously written here (decide only on observations st
 
 - The edge-generation rules implemented (no-case, upper-case, lower-case with a strictly
   negative tail, cross-case, label removal) decide exactly this variant. The test suite checks
-  both checkers against a brute-force solver of the integer-time game with both move orders:
+  every checker against a brute-force solver of the integer-time game with both move orders:
   they match the same-tick game on random small STNUs. Example: `A => C [1, 10]` with
   `t_X = t_C` is DC under same-tick reaction and not DC under next-tick reaction.
 - A first attempt at a next-tick variant (making the lower- and cross-case conditions
@@ -139,9 +139,10 @@ continues. The dispatcher never panics on any input; all tick arithmetic is chec
 | STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) or P³C (Planken, de Weerdt and van der Krogt 2008) | `O(n m + n^2 log n)` | later, only if needed |
 | STN incremental consistency | keep the closed matrix; reject a constraint closing a negative cycle | `O(n^2)` per constraint, `n^2` cells | done |
 | STNU DC check + extended dispatchable network | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
-| STNU DC check, second checker | Morris 2014 backpropagation from negative nodes, one propagation per initial edge type | `O(n (k + 1) (m + n^2) log n)` (not Morris's `O(n^3)`) | done |
-| STNU DC check, faster | RUL⁻ (Cairo, Hunsberger and Rizzi 2018), sped up by Hunsberger and Posenato (AAAI 2022) | `O(mn + k^2 n + k n log n)` (**unverified**) | milestone 2b |
-| Non-DC explanation | semi-reducible negative cycle (SRN-cycle) extraction, following Bhargava, Vaquero and Williams 2017 and Hunsberger/Posenato | — | milestone 2 |
+| STNU DC check (default) | Morris 2014 backpropagation from negative nodes, one linear-scan Dijkstra per node after normalising each link to its own activation node | `O(n m + n^3)`, i.e. `O(n^3)` for `m = O(n^2)`; proof in `stnu/morris.rs` | done |
+| STNU DC check, RUL⁻ | Cairo, Hunsberger and Rizzi 2018, with contingent activation points normalised to executable ones | `O(n m + k (m + k n) log n)` with a binary heap (paper: `O(mn + k^2 n + k n log n)`) | done; the AAAI 2022 speed-up (RUL2021) is open |
+| STNU DC check, cross-check | per-label backpropagation: Morris-style, one propagation per kind of negative in-edge, no normalisation | `O(n (k + 1) (m + n^2) log n)` | done |
+| Non-DC explanation | semi-reducible negative cycle collected while Morris's nested propagations unwind, derived edges expanded to original ones | metered; length not bounded polynomially | done |
 | Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | done |
 
 Two independent algorithms per question are a deliberate choice: they cross-check each other
@@ -190,11 +191,14 @@ optional bounded *incremental* re-check (for replanning after a reset) is a late
     `Error::OutOfMemory` and not an abort. *Gap:* the `O(n + m)` allocations (Bellman-Ford
     state, the cycle vector, `Stn` construction) are not yet budgeted and abort on allocator
     failure; switch them to `try_reserve` before any onboard use of the `alloc` parts. The
-    same holds for `Stnu::check_controllability` (adjacency lists and up to `n^2` derived
-    edges, not checked against `max_cells`). The `IncrementalStn` working copy of its matrix
+    same holds for the STNU checkers' adjacency lists and derived edges (see below). The `IncrementalStn` working copy of its matrix
     is fallible but not counted in `max_cells`, so the peak is twice the counted `n^2`. `Stn::dispatchable` and the rejection explanation of
     `IncrementalStn::add_constraint` meter each phase against the full budget, so they can
-    spend up to twice `max_steps`.
+    spend up to twice `max_steps`. The same holds for every STNU checker other than Morris 2014
+    on a negative verdict, because the explanation comes from a fresh Morris run.
+    `Stnu::check_controllability` (Morris) checks `(n + k)^2` cells and RUL⁻ `k n` cells
+    against `max_cells`, but their allocations are infallible; the per-label backprop ignores
+    `max_cells`.
 - Exhaustion returns `Error::BudgetExhausted` or `Error::MemoryBudgetExceeded`. It never
   returns a partial or guessed verdict. Property test: for any budget, the result is either a
   budget error or identical to the unlimited result.
@@ -222,11 +226,22 @@ Edges chain: the head of each edge is the tail of the next, and the last closes 
 `Bound::Upper` is the edge `from -> to` with weight `hi`; `Bound::Lower` is the edge `to -> from`
 with weight `-lo`. A consumer rechecks the cycle from its own copy of the constraints.
 
-Planned (STNU): a non-DC explanation is a semi-reducible negative cycle. Each entry additionally
-names its role (requirement, contingent lower/upper, wait) and the contingent links whose
-outcomes make the cycle reachable, so that operators see "if the warm-up takes its full 15
-minutes, the transmit window cannot be met". The format must stay a plain, serializable list of
-IDs so ground tools can render it and the CSTNU-Tool comparison can match it structurally.
+STNU (done): a non-DC verdict carries a semi-reducible negative cycle.
+
+```text
+SemiReducibleCycle {
+    edges: [Requirement(CycleEdge) | LowerCase(ContingentId) | UpperCase(ContingentId), ...],
+    weight: Ticks,                                  // < 0, lower-case at lo, upper-case at -hi
+}
+```
+
+The edges chain like an STN cycle (`LabelledEdge::resolve` gives tail, head and weight). An
+upper-case edge reads "if this link takes its full duration", a lower-case edge "if it ends as
+early as possible"; `SemiReducibleCycle::contingent_links` lists the links involved. The cycle
+is not necessarily simple or minimal. Checked property: keeping only its requirement bounds
+(and all links) still gives a network that is not DC. Waits are not named separately: they are
+intermediate edges of the reduction, not inputs. Matching CSTNU-Tool's explanations
+structurally is still open.
 
 ## 8. Testing strategy
 
@@ -235,8 +250,9 @@ IDs so ground tools can render it and the CSTNU-Tool comparison can match it str
 | Example tests | Hand-written networks with known answers (rover example) | done |
 | Property tests (proptest) | BF and FW agree; schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
 | Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | milestone 2 |
-| Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; closure and backprop must match the same-tick game; next-tick DC implies same-tick DC; removing the upper-, lower- or cross-case rule, or the unsuitability test, makes it fail | done |
-| Differential (internal) | Incremental STN vs from-scratch Floyd-Warshall after every constraint; closure vs backprop on STNUs up to 7 executable points and 4 links; STNU without links vs STN; filtered STN vs its minimal network | done (RUL⁻ later) |
+| Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; closure, Morris 2014, RUL⁻ and per-label backprop must match the same-tick game; next-tick DC implies same-tick DC; mutations (run by hand, recorded in the commit messages) must make it fail: closure rules and unsuitability; Morris unsuitability, recursion, lower-case edges, derived edges, stop at non-negative distance, normalisation; RUL⁻ non-length-preserving Upper⁻, blocker check, Lower⁻, the `u - l` bound, seeding with the own lower-case edge, normalisation | done |
+| Differential (internal) | Incremental STN vs from-scratch Floyd-Warshall after every constraint; every STNU checker vs the closure on STNUs up to 7 executable points and 4 links; STNU without links vs STN; filtered STN vs its minimal network | done |
+| Explanations | Every SRN cycle chains, closes with its stated negative weight, and its requirement bounds alone are not DC (oracle on small, closure on medium networks) | done |
 | Simulated dispatch | DC networks (and dispatchable STNs) under ASAP, latest and random agents and min, max and random nature: no dispatcher error, every requirement and contingent bound holds | done; resets and overruns: milestone 4 |
 | Fuzzing | `cargo fuzz` targets for construction, the checks, and the onboard decoder/validator (must reject, never panic) | milestone 2 (decoder: milestone 3) |
 | Model checking | Kani harnesses for the dispatcher step function and the decoder on small fixed capacities: no panic, no overflow, windows respected | milestone 3 |
@@ -246,9 +262,9 @@ IDs so ground tools can render it and the CSTNU-Tool comparison can match it str
 
 1. **STN** (done on `draft/initial`): construction, BF consistency with witness or negative
    cycle, FW minimal network, budgets, property tests, `thumbv7em-none-eabihf` build.
-2. **STNU and DC**: contingent links, labelled-closure checker and Morris backprop checker
-   with a brute-force oracle (done). Open: RUL⁻ checker, SRN-cycle explanations, CSTNU-Tool
-   differential harness, fuzz targets.
+2. **STNU and DC**: contingent links, labelled-closure checker, Morris 2014 `O(n^3)` checker,
+   RUL⁻, per-label backprop, SRN-cycle explanations, brute-force oracle (done). Open: RUL2021,
+   CSTNU-Tool differential harness, fuzz targets.
 3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN, extended (unfiltered)
    dispatchable STNU, `no_std`/no-`alloc` dispatcher with fixed capacity and input validation,
    incremental STN consistency (done). Open: minimal dispatchable ESTNU, compact encoding with
@@ -277,9 +293,13 @@ IDs so ground tools can render it and the CSTNU-Tool comparison can match it str
   target executive can deliver an observation and act on it within one tick; otherwise a
   next-tick checker is needed. Also confirm which variant the CSTNU-Tool STNU checker uses
   before differential testing.
-- Whether the closure's missing round bound is acceptable on the ground, or a checker with a
-  proven bound (RUL⁻, or Morris's single-propagation `O(n^3)` variant) must produce the
-  dispatchable network.
+- Whether the closure's missing round bound is acceptable on the ground. The verdict now has
+  proven bounds (Morris 2014, RUL⁻), but the dispatchable network still comes from the
+  closure; Morris's dispatchable variant (inserting the intermediate edges) or FD_STNU
+  (Hunsberger and Posenato 2023) would give a bounded one.
+- Morris 2014's normalisation: the paper was not available. The crate follows the
+  description in Hunsberger and Posenato (2023, section 2.1.1) with its own split of
+  activation points; this should be compared with the paper before citing it publicly.
 - Whether the onboard network must be minimal (filtered ESTNU) to fit fixed capacities; today
   an STNU's dispatchable network has up to `n^2` edges plus `n k` waits.
 - Dispatcher policy: `step` executes as soon as possible. Whether flight use needs other
@@ -301,6 +321,14 @@ Verified against the CSTNU-Tool page
 - L. Hunsberger and R. Posenato. Sound-and-complete algorithms for checking the dynamic
   controllability of Conditional Simple Temporal Networks with Uncertainty. TIME 2018.
 
+Read in full while implementing the STNU checkers:
+
+- M. Cairo, L. Hunsberger and R. Rizzi. Faster dynamic controllability checking for Simple
+  Temporal Networks with Uncertainty. TIME 2018, LIPIcs 120, 8:1-8:16 (RUL⁻, Algorithms 1-3).
+- L. Hunsberger and R. Posenato. A faster algorithm for converting simple temporal networks
+  with uncertainty into dispatchable form. Information and Computation 293, 2023 (section
+  2.1.1 describes Morris 2014).
+
 From memory, **not verified** (check before citing in public material):
 
 - R. Dechter, I. Meiri and J. Pearl. Temporal constraint networks. Artificial Intelligence 49,
@@ -311,9 +339,8 @@ From memory, **not verified** (check before citing in public material):
   IJCAI 2001.
 - L. Hunsberger. Fixing the semantics for dynamic controllability and providing a more
   practical characterization of dynamic execution strategies. TIME 2009.
-- P. Morris. Dynamic controllability and dispatchability relationships. CPAIOR 2014.
-- M. Cairo, L. Hunsberger and R. Rizzi. Faster dynamic controllability checking for Simple
-  Temporal Networks with Uncertainty. TIME 2018.
+- P. Morris. Dynamic controllability and dispatchability relationships. CPAIOR 2014, LNCS
+  8451 (bibliographic data verified; content only known through the two papers above).
 - N. Bhargava, T. Vaquero and B. Williams. Faster conflict generation for dynamic
   controllability. IJCAI 2017.
 - L. Planken, M. de Weerdt and R. van der Krogt. P³C: a new algorithm for the simple temporal
