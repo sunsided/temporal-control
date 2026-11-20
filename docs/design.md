@@ -57,13 +57,15 @@ cycle gives `0 <= Σ w(e_i) < 0`, a contradiction. So the named constraint bound
 certificate of inconsistency that anyone can recheck without trusting the solver. The cycle
 found is simple (each vertex at most once) but not necessarily minimum in size or weight.
 
-### 3.2 STN with Uncertainty (STNU) *(planned, milestone 2)*
+### 3.2 STN with Uncertainty (STNU)
 
-An STNU adds *contingent links* `(A, l, u, C)` with `0 < l < u < ∞` (Morris, Muscettola and
+An STNU adds *contingent links* `(A, l, u, C)` with `0 < l <= u < ∞` (Morris, Muscettola and
 Vidal 2001): once the activation point `A` is executed, nature sets the contingent point `C` to
 some time in `[A + l, A + u]`. The agent only learns `C` when it happens. Contingent points
-are distinct: each is the target of exactly one contingent link, and the agent never executes
-it. The remaining constraints are *requirement* constraints, as in an STN.
+are distinct: each is the target of exactly one contingent link (`Stnu::add_contingent_link`
+creates it), and the agent never executes it. Activation points may themselves be contingent
+(chains). The remaining constraints are *requirement* constraints, as in an STN. `l = u` is
+accepted (a degenerate but harmless link); `l = 0` is rejected.
 
 A *situation* `ω` fixes every contingent duration. A *dynamic execution strategy* decides, at
 each time, which executable time points to execute, using only the contingent durations
@@ -72,30 +74,60 @@ observed so far.
 **Dynamic controllability (DC).** An STNU is DC iff there is a dynamic strategy that satisfies
 all requirement constraints in every situation.
 
-**Reaction-time variant.** We intend to adopt the standard STNU semantics: decisions may depend
-only on contingent executions observed *before* the decision time, i.e. no instantaneous
-reaction (Hunsberger 2009; attribution to Morris 2014 and Cairo, Hunsberger and Rizzi 2018 is
-**unverified**).
-Variants with instantaneous reaction or bounded reaction time `ε` exist for CSTNs; they are out
-of scope. *Open question:* confirm that the CSTNU-Tool STNU checker uses the same variant before
-differential testing; otherwise mismatches will be spurious. With integer ticks the variant is observable (react at
-`t` or at `t + 1`), so it must be fixed before milestone 2.
+**Reaction-time semantics (decided).** Time is integer ticks. Within one tick, nature's
+contingent events happen first, then the agent decides, so an observation at tick `t` may
+trigger an execution at the same tick `t` (*instantaneous reaction at tick granularity*).
+Formally, the agent's choice at `t` may depend on every contingent time `<= t`.
 
-### 3.3 Dispatchable networks and execution *(planned, milestone 3)*
+This reverses the intent previously written here (decide only on observations strictly before
+`t`, i.e. react at `t + 1`). Reasons:
+
+- The edge-generation rules implemented (no-case, upper-case, lower-case with a strictly
+  negative tail, cross-case, label removal) decide exactly this variant. The test suite checks
+  both checkers against a brute-force solver of the integer-time game with both move orders:
+  they match the same-tick game on random small STNUs. Example: `A => C [1, 10]` with
+  `t_X = t_C` is DC under same-tick reaction and not DC under next-tick reaction.
+- A first attempt at a next-tick variant (making the lower- and cross-case conditions
+  non-strict) did not match the next-tick game on contingent chains and was dropped.
+
+Consequence for integrators: the executive must hand observations of tick `t` to the dispatcher
+before asking it what to execute at `t` (`Dispatcher::step` does this). If the platform can only
+react one tick later, the guarantees do not hold. Next-tick DC implies same-tick DC (also
+tested), so a next-tick checker would be the conservative choice; it is an open question
+(section 11).
+
+### 3.3 Dispatchable networks and execution
 
 A network is *dispatchable* if a greedy dispatcher that only propagates to immediate neighbors
-never violates a constraint (Muscettola, Morris and Tsamardinos 1998). For STNs, the minimal
-dispatchable network is obtained by filtering dominated edges of the minimal network. For DC
-STNUs, the *extended* (contingent-aware) dispatchable form is produced by the DC checker plus
-a post-processing step (Morris 2014; Hunsberger and Posenato's minimal dispatchable STNU work
-— **citation unverified**).
+never violates a constraint (Muscettola, Morris and Tsamardinos 1998).
 
-Execution semantics (onboard): the dispatcher holds, per time point, an execution window
-`[earliest, latest]` and an enabled flag. At each tick it (1) ingests observed contingent
-executions, (2) propagates through the dispatchable edges of the executed points only, (3)
-reports every enabled point whose window contains `now` and that the strategy wants executed,
-and (4) reports a violation if a window closes unexecuted or an observation lies outside its
-contingent bounds (an assumption violation, which the executive must handle).
+**STN.** `MinimalNetwork::dispatchable` filters the minimal network. Rigid components
+(`D[i][j] + D[j][i] = 0`) get a leader, their earliest member (lowest index on ties); members are
+tied to it by two edges. Among leaders, a non-negative edge `A -> C` is dropped if a
+non-negative `B -> C` has `D[A][B] + D[B][C] = D[A][C]`, a negative `A -> C` if a negative
+`A -> B` does. Members at offset zero from their leader get a copy of every kept leader edge so
+that their window always equals the leader's (otherwise they could run first with an
+unconstrained window). Tests check that the filtered network has the same minimal network as
+the original, and that random, earliest and latest agents never fail.
+
+**STNU.** `Stnu::dispatchable` returns an *extended* network: every ordinary edge of the closed
+labelled graph plus every *wait* `(X, C, δ)`, an upper-case edge `X -> A_C` of weight `-δ` that is
+tighter than the parallel ordinary edge: `X` must not execute before `A_C + δ` unless `C` was
+observed. No filtering is applied (shortcut; a minimal dispatchable ESTNU in the style of
+Hunsberger and Posenato, **citation unverified**, is future work).
+
+**Execution semantics (onboard, `Dispatcher<N, E>`).** Per time point: a window `[lb, ub]`, the
+number of unhappened heads of its *precedence* edges (edges of negative weight), and the time it
+happened. When a point happens at `t`, only its own edges propagate: `x -> y` with weight `w`
+gives `ub[y] <= t + w`, and `y -> x` gives `lb[y] >= t - w`. An executable point may execute at
+`now` iff all its precedence heads happened, `lb <= now <= ub`, and each of its waits is
+released (contingent observed, or activation happened at `a` and `now >= a + δ`). A tick
+(`step`) ingests observations, reports missed deadlines and overdue contingent points, then
+executes as soon as possible; `can_execute`/`execute` let an executive choose later times
+itself. Errors are typed: missed deadline, contingent out of bounds (assumption violated),
+constraint violated or empty window (the network was not dispatchable), time going backwards,
+capacity. Observations are recorded even when they violate an assumption, so monitoring
+continues. The dispatcher never panics on any input; all tick arithmetic is checked.
 
 ## 4. Algorithm choices
 
@@ -104,10 +136,12 @@ contingent bounds (an assumption violation, which the executive must handle).
 | STN consistency + witness schedule + negative cycle | Bellman-Ford from a virtual source, predecessor walk for the cycle | `O(n m)` time, `O(n + m)` memory | done |
 | STN minimal network | Floyd-Warshall with early negative-diagonal stop | `O(n^3)` time, `n^2` cells | done |
 | STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) or P³C (Planken, de Weerdt and van der Krogt 2008) | `O(n m + n^2 log n)` | later, only if needed |
-| STNU DC check | Morris 2014 `O(n^3)` cubic algorithm | `O(n^3)` | milestone 2 |
+| STN incremental consistency | keep the closed matrix; reject a constraint closing a negative cycle | `O(n^2)` per constraint, `n^2` cells | done |
+| STNU DC check + extended dispatchable network | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
+| STNU DC check, second checker | Morris 2014 backpropagation from negative nodes, one propagation per initial edge type | `O(n (k + 1) (m + n^2) log n)` (not Morris's `O(n^3)`) | done |
 | STNU DC check, faster | RUL⁻ (Cairo, Hunsberger and Rizzi 2018), sped up by Hunsberger and Posenato (AAAI 2022) | `O(mn + k^2 n + k n log n)` (**unverified**) | milestone 2b |
 | Non-DC explanation | semi-reducible negative cycle (SRN-cycle) extraction, following Bhargava, Vaquero and Williams 2017 and Hunsberger/Posenato | — | milestone 2 |
-| Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | milestone 3 |
+| Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | done |
 
 Two independent algorithms per question are a deliberate choice: they cross-check each other
 in tests and, on the ground, at runtime. `Stn::minimal_network` already does this: if
@@ -195,7 +229,9 @@ IDs so ground tools can render it and the CSTNU-Tool comparison can match it str
 | Example tests | Hand-written networks with known answers (rover example) | done |
 | Property tests (proptest) | BF and FW agree; schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
 | Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | milestone 2 |
-| Differential (internal) | Morris cubic vs RUL⁻ on the same STNUs; STNU with degenerate contingent links vs STN code | milestone 2 |
+| Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; closure and backprop must match the same-tick game; next-tick DC implies same-tick DC; removing the upper-, lower- or cross-case rule, or the unsuitability test, makes it fail | done |
+| Differential (internal) | Incremental STN vs from-scratch Floyd-Warshall after every constraint; closure vs backprop on STNUs up to 7 executable points and 4 links; STNU without links vs STN; filtered STN vs its minimal network | done (RUL⁻ later) |
+| Simulated dispatch | DC networks (and dispatchable STNs) under ASAP, latest and random agents and min, max and random nature: no dispatcher error, every requirement and contingent bound holds | done; resets and overruns: milestone 4 |
 | Fuzzing | `cargo fuzz` targets for construction, the checks, and the onboard decoder/validator (must reject, never panic) | milestone 2 (decoder: milestone 3) |
 | Model checking | Kani harnesses for the dispatcher step function and the decoder on small fixed capacities: no panic, no overflow, windows respected | milestone 3 |
 | Simulation | deterministic replay with injected contingent durations and resets: DC network plus dispatcher never violates a requirement constraint | milestone 4 |
@@ -204,10 +240,13 @@ IDs so ground tools can render it and the CSTNU-Tool comparison can match it str
 
 1. **STN** (done on `draft/initial`): construction, BF consistency with witness or negative
    cycle, FW minimal network, budgets, property tests, `thumbv7em-none-eabihf` build.
-2. **STNU and DC**: contingent links, Morris 2014 checker, RUL⁻ checker, SRN-cycle
-   explanations, CSTNU-Tool differential harness, fuzz targets.
-3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN/STNU, compact encoding
-   with validator, `no_std`/no-`alloc` dispatcher with fixed capacity, Kani harnesses.
+2. **STNU and DC**: contingent links, labelled-closure checker and Morris backprop checker
+   with a brute-force oracle (done). Open: RUL⁻ checker, SRN-cycle explanations, CSTNU-Tool
+   differential harness, fuzz targets.
+3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN, extended (unfiltered)
+   dispatchable STNU, `no_std`/no-`alloc` dispatcher with fixed capacity and input validation,
+   incremental STN consistency (done). Open: minimal dispatchable ESTNU, compact encoding with
+   checksum, Kani harnesses.
 4. **Simulation**: deterministic simulator with injected durations, resets and overruns.
 5. **Adapters**: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
 
@@ -228,7 +267,18 @@ IDs so ground tools can render it and the CSTNU-Tool comparison can match it str
 
 ## 11. Open questions
 
-- DC reaction-time semantics of the CSTNU-Tool STNU checker (see 3.2).
+- Reaction time (see 3.2). Default chosen: same-tick reaction. Needs confirmation that the
+  target executive can deliver an observation and act on it within one tick; otherwise a
+  next-tick checker is needed. Also confirm which variant the CSTNU-Tool STNU checker uses
+  before differential testing.
+- Whether the closure's missing round bound is acceptable on the ground, or a checker with a
+  proven bound (RUL⁻, or Morris's single-propagation `O(n^3)` variant) must produce the
+  dispatchable network.
+- Whether the onboard network must be minimal (filtered ESTNU) to fit fixed capacities; today
+  an STNU's dispatchable network has up to `n^2` edges plus `n k` waits.
+- Dispatcher policy: `step` executes as soon as possible. Whether flight use needs other
+  built-in policies (as late as possible, preferred times) or leaves that to the executive via
+  `can_execute`/`execute`.
 - Whether onboard incremental re-checking is required, and its budget.
 - Whether contingent links with `l = 0` must be supported (some literature allows `0 <= l`).
 - Encoding format for the dispatchable network (versioned, checksummed; fixed-width integers).

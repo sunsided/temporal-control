@@ -2,17 +2,25 @@
 
 Simple temporal networks with uncertainty: dynamic controllability checking and dispatchable execution for no_std targets.
 
-## Planned scope
+## Scope and status
 
-- Simple Temporal Networks (STN)
-- STNs with Uncertainty (STNU) and dynamic controllability
-- Dispatchable network generation
-- Small, bounded-memory onboard dispatcher
-- Explanations of inconsistency and non-controllability
+Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md](docs/design.md).
 
-## Status
+| Feature | Status |
+| --- | --- |
+| STN consistency (Bellman-Ford) with negative-cycle explanation | done |
+| STN minimal network (Floyd-Warshall) | done |
+| Incremental STN consistency, `O(n^2)` per constraint | done |
+| Minimal dispatchable STN (dominated-edge filtering) | done |
+| STNU dynamic controllability: labelled closure with extended dispatchable network | done |
+| STNU dynamic controllability: Morris backpropagation (second checker) | done |
+| Onboard dispatcher, `no_std` without `alloc`, fixed capacity | done |
+| Explanations of non-controllability | planned |
+| Compact checksummed encoding of dispatchable networks | planned |
+| Differential tests against CSTNU-Tool, fuzzing, Kani harnesses | planned |
 
-Pre-release (0.0.0). Milestone 1 (STN construction, consistency checking with negative-cycle explanations, minimal networks, budgets) is implemented on `draft/initial`; the API will change. See [docs/design.md](docs/design.md).
+Reaction-time semantics: an observation at tick `t` may trigger executions at the same tick.
+Every algorithm takes an explicit compute and memory budget.
 
 ## License
 

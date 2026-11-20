@@ -5,10 +5,17 @@
 //!
 //! ## Scope
 //!
-//! - Simple Temporal Networks (STN): construction, consistency checking with a negative-cycle
-//!   explanation, minimal networks. Available now behind the default `alloc` feature.
-//! - Planned: STNs with Uncertainty (STNU) and dynamic controllability, dispatchable network
-//!   generation, a small bounded-memory onboard dispatcher, explanations of non-controllability.
+//! - Simple Temporal Networks ([`Stn`]): consistency checking with a negative-cycle explanation,
+//!   minimal networks, incremental consistency ([`IncrementalStn`]) and minimal dispatchable
+//!   networks ([`Stn::dispatchable`]).
+//! - STNs with Uncertainty ([`Stnu`]): dynamic controllability by two independent checkers
+//!   ([`Stnu::dispatchable`], which also yields an extended dispatchable network with waits,
+//!   and [`Stnu::check_controllability`]).
+//! - An onboard [`Dispatcher`] with fixed capacity that needs no `alloc`.
+//! - Planned: explanations of non-controllability, a compact checksummed encoding of
+//!   dispatchable networks.
+//!
+//! Everything except [`Dispatcher`] and its input types needs the default `alloc` feature.
 //!
 //! All time values are integer [`Ticks`]. All arithmetic is checked, and every algorithm runs
 //! under an explicit [`Budget`]. Exhausting a budget yields [`Error::BudgetExhausted`], never a
@@ -34,7 +41,8 @@
 //!
 //! ## Status
 //!
-//! Pre-release (0.0.0). Milestone 1 (STN) is implemented; the API will change.
+//! Pre-release (0.0.0). Milestone 1 (STN) and most of milestones 2 and 3 (STNU, dispatchable
+//! form, dispatcher) are implemented; the API will change.
 //!
 //! Repository: <https://github.com/sunsided/temporal-control>
 
