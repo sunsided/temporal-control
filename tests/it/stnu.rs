@@ -68,7 +68,7 @@ fn explanation(stnu: &Stnu) -> Option<SemiReducibleCycle> {
 }
 
 /// Asserts that `cycle` chains, closes and has the stated negative weight in `stnu`.
-fn assert_cycle_closes(stnu: &Stnu, cycle: &SemiReducibleCycle) {
+pub(crate) fn assert_cycle_closes(stnu: &Stnu, cycle: &SemiReducibleCycle) {
     let edges: Vec<_> = cycle
         .edges()
         .map(|e| e.resolve(stnu).expect("edge belongs to the network"))

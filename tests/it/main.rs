@@ -6,6 +6,7 @@ mod examples;
 mod generators;
 mod incremental;
 mod oracle;
+mod papers;
 mod properties;
 mod sim;
 mod stnu;
