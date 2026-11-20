@@ -319,3 +319,60 @@ proptest! {
         }
     }
 }
+
+/// Two executable points with `5 <= t_1 - t_0 <= 10`.
+fn two_point_edges() -> [DispatchEdge; 2] {
+    [
+        DispatchEdge {
+            from: TimePoint(0),
+            to: TimePoint(1),
+            weight: Ticks(10),
+        },
+        DispatchEdge {
+            from: TimePoint(1),
+            to: TimePoint(0),
+            weight: Ticks(-5),
+        },
+    ]
+}
+
+/// Dispatcher in static-friendly storage: loaded in place, reloaded, and unchanged by a
+/// rejected load.
+#[test]
+fn load_in_place_replaces_or_keeps_state() {
+    let points = [PointKind::Executable; 2];
+    let edges = two_point_edges();
+    let mut d = Dispatcher::<4, 8>::EMPTY;
+    assert!(d.is_complete());
+    assert_eq!(d.window(TimePoint(0)), None);
+
+    d.load(&points, &edges, &[]).unwrap();
+    d.execute(TimePoint(0), Ticks(3)).unwrap();
+    let before = format!("{d:?}");
+
+    let bad = [DispatchEdge {
+        from: TimePoint(0),
+        to: TimePoint(9),
+        weight: Ticks(1),
+    }];
+    assert_eq!(
+        d.load(&points, &bad, &[]),
+        Err(DispatchError::InvalidNetwork)
+    );
+    assert_eq!(
+        d.load(&[PointKind::Executable; 5], &[], &[]),
+        Err(DispatchError::CapacityExceeded)
+    );
+    assert_eq!(format!("{d:?}"), before);
+
+    d.load(&points, &edges, &[]).unwrap();
+    assert_eq!(d.time(TimePoint(0)), None);
+    assert_eq!(d.window(TimePoint(1)), Some((None, None)));
+    assert_eq!(
+        format!("{d:?}"),
+        format!(
+            "{:?}",
+            Dispatcher::<4, 8>::new(&points, &edges, &[]).unwrap()
+        )
+    );
+}

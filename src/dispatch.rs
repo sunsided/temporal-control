@@ -221,39 +221,86 @@ pub struct Dispatcher<const N: usize, const E: usize> {
 }
 
 impl<const N: usize, const E: usize> Dispatcher<N, E> {
-    /// Validates a dispatchable network and loads it.
+    /// A dispatcher with no network loaded, usable in `const` and `static` initialisers.
+    ///
+    /// Flight software typically places the dispatcher in statically allocated memory once
+    /// and then calls [`Self::load`] for every new plan, so the (possibly large) structure is
+    /// never built on the stack and returned by value. With no network loaded the dispatcher
+    /// has no points, [`Self::is_complete`] is true and every point handle is unknown.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use temporal_control::{DispatchEdge, Dispatcher, PointKind, Ticks, TimePoint};
+    ///
+    /// // Built at compile time; a flight build would put this behind its own cell type.
+    /// static IDLE: Dispatcher<8, 32> = Dispatcher::EMPTY;
+    /// assert!(IDLE.is_complete());
+    ///
+    /// let mut d = Dispatcher::<8, 32>::EMPTY;
+    /// let edges = [DispatchEdge { from: TimePoint(0), to: TimePoint(1), weight: Ticks(10) }];
+    /// d.load(&[PointKind::Executable; 2], &edges, &[]).expect("fits");
+    /// assert!(!d.is_complete());
+    /// ```
+    pub const EMPTY: Self = Self {
+        n: 0,
+        kinds: [PointKind::Executable; N],
+        lb: [None; N],
+        ub: [None; N],
+        time: [None; N],
+        pending: [0; N],
+        start: [0; N],
+        m: 0,
+        entries: [Entry::Empty; E],
+        now: None,
+    };
+
+    /// Validates a dispatchable network and loads it into a new dispatcher.
+    ///
+    /// Shorthand for [`Self::EMPTY`] followed by [`Self::load`]. The dispatcher is returned by
+    /// value; for large capacities on a small stack prefer [`Self::load`] on a dispatcher in
+    /// static memory.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::load`].
+    pub fn new(
+        points: &[PointKind],
+        edges: &[DispatchEdge],
+        waits: &[Wait],
+    ) -> Result<Self, DispatchError> {
+        let mut d = Self::EMPTY;
+        d.load(points, edges, waits)?;
+        Ok(d)
+    }
+
+    /// Validates a dispatchable network and loads it in place, replacing any earlier network
+    /// and execution state.
     ///
     /// This is the onboard trust boundary: every index, bound and capacity is checked, and
-    /// nothing is assumed about how the network was produced.
+    /// nothing is assumed about how the network was produced. Validation completes before the
+    /// first write, so a rejected network leaves the dispatcher exactly as it was (still
+    /// executing the previous plan, if any). Loading needs no stack memory proportional to
+    /// `N` or `E`.
     ///
     /// # Errors
     ///
     /// - [`DispatchError::CapacityExceeded`] if `points.len() > N` or
     ///   `2 * edges.len() + waits.len() > E`.
     /// - [`DispatchError::InvalidNetwork`] for any malformed input (see its docs).
-    pub fn new(
+    pub fn load(
+        &mut self,
         points: &[PointKind],
         edges: &[DispatchEdge],
         waits: &[Wait],
-    ) -> Result<Self, DispatchError> {
+    ) -> Result<(), DispatchError> {
         validate(points, edges, waits, N, E)?;
 
-        let mut d = Self {
-            n: points.len(),
-            kinds: [PointKind::Executable; N],
-            lb: [None; N],
-            ub: [None; N],
-            time: [None; N],
-            pending: [0; N],
-            start: [0; N],
-            m: 0,
-            entries: [Entry::Empty; E],
-            now: None,
-        };
-
-        d.kinds[..points.len()].copy_from_slice(points);
-        d.fill_entries(edges, waits);
-        Ok(d)
+        self.clear();
+        self.n = points.len();
+        self.kinds[..points.len()].copy_from_slice(points);
+        self.fill_entries(edges, waits);
+        Ok(())
     }
 
     /// Records that contingent point `tp` was observed at `now`.
@@ -644,72 +691,87 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
         }
     }
 
-    /// Builds the owner-grouped adjacency from validated input and initializes `pending`.
-    fn fill_entries(&mut self, edges: &[DispatchEdge], waits: &[Wait]) {
-        let mut degree = [0usize; N];
+    /// Resets every field to the state of [`Self::EMPTY`], in place.
+    fn clear(&mut self) {
+        self.n = 0;
+        self.kinds.fill(PointKind::Executable);
+        self.lb.fill(None);
+        self.ub.fill(None);
+        self.time.fill(None);
+        self.pending.fill(0);
+        self.start.fill(0);
+        self.m = 0;
+        self.entries.fill(Entry::Empty);
+        self.now = None;
+    }
 
+    /// Builds the owner-grouped adjacency from validated input and initializes `pending`.
+    ///
+    /// A counting sort that works inside `start` instead of on temporary arrays: `start[p]`
+    /// first counts `p`'s entries, then becomes the end of `p`'s range, and filling backwards
+    /// moves it to the beginning. Iterating the input in reverse keeps each owner's entries in
+    /// input order (its edge entries in edge order, then its waits), which decides which
+    /// violation [`Self::happen`] reports first.
+    fn fill_entries(&mut self, edges: &[DispatchEdge], waits: &[Wait]) {
         for e in edges {
-            degree[e.from.0] += 1;
-            degree[e.to.0] += 1;
+            self.start[e.from.0] += 1;
+            self.start[e.to.0] += 1;
+
+            if is_precedence(e.from.0, e.to.0, e.weight) {
+                self.pending[e.from.0] += 1;
+            }
         }
 
         for w in waits {
-            degree[w.waiter.0] += 1;
+            self.start[w.waiter.0] += 1;
         }
 
-        let mut next = 0;
+        let mut end = 0;
 
         for p in 0..self.n {
-            self.start[p] = next;
-            next += degree[p];
+            end += self.start[p];
+            self.start[p] = end;
         }
 
-        self.m = next;
-        let mut cursor = self.start;
+        self.m = end;
 
-        for e in edges {
+        for w in waits.iter().rev() {
+            let entry = Entry::Wait {
+                contingent: w.contingent.0,
+                delay: w.delay,
+            };
+            self.push_back(w.waiter.0, entry);
+        }
+
+        for e in edges.iter().rev() {
             let (u, v) = (e.from.0, e.to.0);
-            push(
-                &mut self.entries,
-                &mut cursor[u],
-                Entry::Upper {
-                    target: v,
-                    weight: e.weight,
-                },
-            );
-            push(
-                &mut self.entries,
-                &mut cursor[v],
+            self.push_back(
+                v,
                 Entry::Lower {
                     target: u,
                     weight: e.weight,
                 },
             );
-
-            if is_precedence(u, v, e.weight) {
-                self.pending[u] += 1;
-            }
+            self.push_back(
+                u,
+                Entry::Upper {
+                    target: v,
+                    weight: e.weight,
+                },
+            );
         }
+    }
 
-        for w in waits {
-            let entry = Entry::Wait {
-                contingent: w.contingent.0,
-                delay: w.delay,
-            };
-            push(&mut self.entries, &mut cursor[w.waiter.0], entry);
-        }
+    /// Writes `entry` just before the current `start[owner]` and moves `start[owner]` there.
+    fn push_back(&mut self, owner: usize, entry: Entry) {
+        self.start[owner] -= 1;
+        self.entries[self.start[owner]] = entry;
     }
 }
 
 /// Whether edge `from -> to` with `weight` makes `from` wait for `to` (see the module docs).
 fn is_precedence(from: usize, to: usize, weight: Ticks) -> bool {
     weight < Ticks::ZERO && from != to
-}
-
-/// Writes `entry` at `*cursor` and advances the cursor.
-fn push(entries: &mut [Entry], cursor: &mut usize, entry: Entry) {
-    entries[*cursor] = entry;
-    *cursor += 1;
 }
 
 /// `Ok(())` if `ok`, else [`DispatchError::ConstraintViolated`] for point `p`.
