@@ -8,7 +8,7 @@ use temporal_control::{
 use crate::generators::{StnSpec, any_stn, extreme_stn};
 
 /// Whether a verdict says "consistent", ignoring its payload.
-fn is_consistent<T>(v: &Verdict<T>) -> bool {
+pub(crate) fn is_consistent<T>(v: &Verdict<T>) -> bool {
     matches!(v, Verdict::Consistent(_))
 }
 
@@ -32,7 +32,7 @@ fn edge_of(stn: &Stn, edge: temporal_control::CycleEdge) -> (TimePoint, TimePoin
 }
 
 /// Asserts that `cycle` chains, closes and has the reported negative weight.
-fn assert_valid_cycle(stn: &Stn, cycle: &NegativeCycle) {
+pub(crate) fn assert_valid_cycle(stn: &Stn, cycle: &NegativeCycle) {
     let edges: Vec<_> = cycle.edges().iter().map(|&e| edge_of(stn, e)).collect();
     assert_ne!(edges.len(), 0, "cycle must not be empty");
 

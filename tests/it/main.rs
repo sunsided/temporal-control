@@ -2,4 +2,5 @@
 
 mod examples;
 mod generators;
+mod incremental;
 mod properties;

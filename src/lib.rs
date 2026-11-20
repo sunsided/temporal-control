@@ -54,7 +54,7 @@ pub use budget::Budget;
 pub use error::Error;
 #[cfg(feature = "alloc")]
 pub use stn::{
-    Bound, Constraint, ConstraintId, CycleEdge, MinimalNetwork, NegativeCycle, Schedule, Stn,
-    TimePoint, Verdict,
+    Bound, Constraint, ConstraintId, CycleEdge, IncrementalStn, MinimalNetwork, NegativeCycle,
+    Schedule, Stn, TimePoint, Verdict,
 };
 pub use ticks::Ticks;

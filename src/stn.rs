@@ -9,11 +9,13 @@
 //! graph LR
 //!     stn["Stn"] -->|"check_consistency (Bellman-Ford)"| v1["Verdict: Schedule or NegativeCycle"]
 //!     stn -->|"minimal_network (Floyd-Warshall)"| v2["Verdict: MinimalNetwork or NegativeCycle"]
+//!     inc["IncrementalStn"] -->|"add_constraint, O(n^2)"| v3["Verdict: ConstraintId or NegativeCycle"]
 //! ```
 
 mod bellman_ford;
 mod explanation;
 mod floyd_warshall;
+mod incremental;
 mod minimal;
 
 use alloc::vec::Vec;
@@ -21,6 +23,7 @@ use alloc::vec::Vec;
 use crate::{Budget, Error, Ticks};
 
 pub use explanation::{Bound, CycleEdge, NegativeCycle};
+pub use incremental::IncrementalStn;
 pub use minimal::MinimalNetwork;
 
 /// Handle of a time point inside one [`Stn`].
