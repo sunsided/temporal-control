@@ -435,6 +435,45 @@ proptest! {
         }
     }
 
+    /// Links with `lo == hi`, which Morris (2014), MMV (2001) and Hunsberger (2009) exclude but
+    /// this crate accepts: every checker and dispatchable-network algorithm still matches the
+    /// game under both reaction semantics, and the networks dispatch correctly.
+    #[test]
+    fn rigid_links_match_oracle(spec in small_stnu(), mask in 0u8.., seed in 1u64..) {
+        let mut spec = spec;
+
+        for (i, link) in spec.links.iter_mut().enumerate() {
+            if mask & (1 << (i % 8)) != 0 {
+                link.2 = link.1;
+            }
+        }
+
+        let stnu = spec.build();
+        let expected = oracle::is_dc(&spec, Reaction::Instant);
+
+        for algorithm in DISPATCHERS {
+            let net = estnu_with(&stnu, algorithm);
+            prop_assert_eq!(net.is_some(), expected, "{:?}", algorithm);
+
+            if let Some(net) = net {
+                simulate_all(&spec, &net, seed);
+            }
+        }
+
+        for algorithm in ALGORITHMS {
+            prop_assert_eq!(is_dc(&stnu, algorithm), expected, "{:?}", algorithm);
+        }
+
+        let shifted = stnu
+            .with_reaction(temporal_control::Reaction::NextTick)
+            .expect("small bounds");
+        let expected = oracle::is_dc(&spec, Reaction::NextTick);
+
+        for algorithm in ALGORITHMS {
+            prop_assert_eq!(is_dc(&shifted, algorithm), expected, "{:?}", algorithm);
+        }
+    }
+
     /// On networks too large for the oracle, every checker still agrees with the closure, and
     /// the closure's network dispatches without violations.
     #[test]

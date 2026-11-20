@@ -134,8 +134,9 @@ never violates a constraint (Muscettola, Morris and Tsamardinos, KR 1998). That 
 available; the definition, the filtering rules and the minimality result below are as Morris
 (CPAIOR 2014, section 5) restates them.
 
-**STN.** `MinimalNetwork::dispatchable` filters the minimal network (the result is minimal
-except for the edge copies on simultaneous points described below). Rigid components
+**STN.** `MinimalNetwork::dispatchable` filters the minimal network (by the restated MMT result
+the outcome is minimal except for the edge copies on simultaneous points described below; not
+checked against MMT itself, and minimality is not tested). Rigid components
 (`D[i][j] + D[j][i] = 0`) get a leader, their earliest member (lowest index on ties); members are
 tied to it by two edges. Among leaders, a non-negative edge `A -> C` is dropped if a
 non-negative `B -> C` has `D[A][B] + D[B][C] = D[A][C]`, a negative `A -> C` if a negative
@@ -162,7 +163,8 @@ unless `C` was observed. `DispatchAlgorithm` picks the source:
 - `Closure`: the all-pairs labelled closure (unbounded rounds), kept as the reference.
 
 All three are checked by simulating the dispatcher under every agent and nature policy against
-every requirement; for `Minimal` this is the only evidence of dispatchability.
+every requirement. For `Morris2014` and `Minimal` this is the only evidence of
+dispatchability (section 12.1); the closure is the reference.
 
 **Execution semantics (onboard, `Dispatcher<N, E>`).** Per time point: a window `[lb, ub]`, the
 number of unhappened heads of its *precedence* edges (edges of negative weight), and the time it
@@ -257,7 +259,9 @@ optional bounded *incremental* re-check (for replanning after a reset) is a late
 ## 6. Budgets and error model
 
 - Every algorithm takes a `Budget { max_steps, max_cells }`.
-  - A *step* is one edge relaxation (Bellman-Ford) or one matrix-cell update (Floyd-Warshall).
+  - A *step* is one edge relaxation (Bellman-Ford), one matrix-cell update (Floyd-Warshall)
+    or one triangle visit (P³C). For P³C, `max_cells` bounds the directed edges of the chordal
+    graph (two per pair, fill edges included).
   - `max_cells` bounds the largest matrix allocation; the check happens before allocating, and
     the Floyd-Warshall matrix uses `try_reserve_exact`, so its allocation failure is
     `Error::OutOfMemory` and not an abort. *Gap:* the `O(n + m)` allocations (Bellman-Ford
@@ -408,12 +412,14 @@ harness so that either can be run alone.
 ## 9. Milestones
 
 1. **STN** (done on `draft/initial`): construction, BF consistency with witness or negative
-   cycle, FW minimal network, budgets, property tests, `thumbv7em-none-eabihf` build.
+   cycle, FW minimal network, P³C minimal constraints of the constrained pairs, budgets,
+   property tests, `thumbv7em-none-eabihf` build. All STN and DC algorithms compared with
+   their papers (section 12).
 2. **STNU and DC**: contingent links, labelled-closure checker, Morris 2014 `O(n^3)` checker,
    RUL⁻, RUL2021, per-label backprop, SRN-cycle explanations (compact), next-tick reaction by
    transformation, brute-force oracle, fuzz target cross-checking every checker (done). Open:
    CSTNU-Tool differential harness.
-3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN, bounded and reduced
+3. **Dispatchable form and onboard dispatcher**: filtered dispatchable STN, bounded and reduced
    dispatchable ESTNU (Morris 2014 dispatchable + `minDispESTNU` without diamonds),
    `no_std`/no-`alloc` dispatcher with fixed capacity and input validation, incremental STN
    consistency, in-place loading from a `const EMPTY`, `u16`/`u32` index types, compact
@@ -505,7 +511,8 @@ implemented*. Examples from the papers with their stated answers are tests in
 | Complexity `O(N^3)`: at most `N` non-trivial calls of `O(N^2)` with a Fibonacci heap, `O(N^2)` added edges (section 4) | `O(n m + n^3)` with a linear scan; equal to `O(n^3)` when `m = O(n^2)` | matches; the paper's per-call `O(N^2)` presumes `E = O(N^2)`, which the crate states explicitly |
 | `determineDC+`: save the negative edges and waits found at negative distance (end of section 4) | `estnu.rs`: CSTNU-Tool's variant without normal form (its ties would end up in the output), one upper-case pass per link a node activates, then an ordinary pass | deviation: the passes are not from the paper |
 | Dispatchable ESTNU: Theorem 4 (dispatchable implies DC), Theorems 5-7 (PP-complete basic projections make every projection dispatchable) | not re-proven; the paper argues only informally that `determineDC+` reaches PP completeness | evidence for `Morris2014` and `Minimal` networks is simulation under all agent and nature policies |
-| ESTNU dispatching execution: free choices only for executable points, respect waits and precedences, propagate to neighbours (section 5) | `Dispatcher` | matches |
+| ESTNU dispatching execution: free choices only for executable points, respect waits and precedences, propagate to neighbours (section 5) | `Dispatcher`: propagation along a happened point's own edges only; an executable point may run iff its precedence heads happened, it is inside its window and each wait is released (contingent observed, or `now >= a + delay`) | matches |
+| Links with `l = u` (excluded by the paper) | `rigid_links_match_oracle`: every checker and dispatchable-network algorithm matches the oracle under both reactions, and the networks dispatch | deviation, tested |
 | Section 4 example cycle `E -> B -> A -> B -> D -> C -> D -> B -> A -> B -> E` | `morris_2014_example_cycle_is_not_dc` (lower bounds 1 instead of 0, same path weights) | matches |
 
 ### 12.2 Hunsberger, TIME 2009 (semantics, `stnu/reaction.rs`, the oracle)
@@ -527,7 +534,7 @@ implemented*. Examples from the papers with their stated answers are tests in
 | Wait `<C, t>` on `AB`: `B` waits until `C` happened or `t` after `A` | `Wait { waiter, contingent, delay }`, released as in MMV Fig. 5 | matches |
 | Execution (Fig. 5): forced execution at upper bounds, live and enabled points, waits | `Dispatcher::step` executes as soon as possible; with `can_execute`/`execute` the executive must respect upper bounds itself (missed deadlines are reported) | matches in substance |
 | Fig. 2: a network 3DC accepts but that is not DC | `mmv_2001_quiescent_network_is_not_dc` | matches |
-| The triangle reductions and wait regression themselves | not implemented; the closure uses the labelled-graph rules of Morris and Muscettola (2005) as restated by Morris 2014 | not implemented (superseded) |
+| The triangle reductions and wait regression themselves | not implemented; `stnu/closure.rs` applies the five labelled-graph reductions as Morris 2014 (section 3) states them, with the paper's conditions (lower- and cross-case only for a negative second edge, cross-case only for distinct labels, label removal for `z >= -l`), plus an all-max projection consistency check | not implemented (superseded) |
 
 ### 12.4 Dechter, Meiri and Pearl, AIJ 1991 (`stn/*`)
 

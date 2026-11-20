@@ -88,8 +88,8 @@ fn dmp_table_1_minimal_network() {
     }
 }
 
-/// P³C (Planken, de Weerdt and van der Krogt 2008, whose Fig. 4 shows the same minimal
-/// network) reproduces Table 1 too once every pair is of interest.
+/// P³C (Planken, de Weerdt and van der Krogt 2008) reproduces Table 1 too once every pair is
+/// of interest.
 #[test]
 fn dmp_table_1_by_p3c() {
     let mut stn = dmp_example();
