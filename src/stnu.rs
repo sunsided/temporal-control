@@ -78,14 +78,24 @@ pub enum Controllability<T> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum DcAlgorithm {
     /// Morris (2014): backpropagation from negative nodes, one propagation per node,
-    /// `O(n m + n^3)` time, explains negative verdicts itself.
+    /// explains negative verdicts itself.
+    ///
+    /// Time `O(n m + n^3)` for `n` points, `k` links and `m` requirement bounds, i.e. Morris's
+    /// `O(n^3)` when `m = O(n^2)`. Proof sketch: in Morris's normal form there are
+    /// `n' = n + k <= 2n` nodes; each runs at most one backward Dijkstra; a linear-scan
+    /// extract-min makes that `O(n'^2)` plus one scan of each node's incoming edges; derived
+    /// edges are non-negative and at most one per (node, source) pair, so all incoming lists
+    /// together hold `O(m + n'^2)` edges, each scanned at its final length because a node's
+    /// own propagation (the only one adding edges into it) finishes before anyone extends
+    /// through it. Explaining a negative verdict is extra and not polynomially bounded (see
+    /// [`SemiReducibleCycle`]).
     #[default]
     Morris2014,
     /// RUL⁻ (Cairo, Hunsberger and Rizzi 2018): backpropagation from contingent points with a
     /// potential function, at most `2k` rounds, `O(n m + k (m + k n) log n)`. Fastest on
     /// sparse networks with few links.
     RulMinus,
-    /// Morris-style backpropagation without normalisation: one propagation per kind of
+    /// Morris-style backpropagation without the normal form: one propagation per kind of
     /// negative incoming edge, `O(n (k + 1) (m + n^2) log n)`. Kept as an independent
     /// cross-check.
     PerLabelBackprop,

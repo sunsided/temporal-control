@@ -139,10 +139,10 @@ continues. The dispatcher never panics on any input; all tick arithmetic is chec
 | STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) or P³C (Planken, de Weerdt and van der Krogt 2008) | `O(n m + n^2 log n)` | later, only if needed |
 | STN incremental consistency | keep the closed matrix; reject a constraint closing a negative cycle | `O(n^2)` per constraint, `n^2` cells | done |
 | STNU DC check + extended dispatchable network | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
-| STNU DC check (default) | Morris 2014 backpropagation from negative nodes, one linear-scan Dijkstra per node after normalising each link to its own activation node | `O(n m + n^3)`, i.e. `O(n^3)` for `m = O(n^2)`; proof in `stnu/morris.rs` | done |
+| STNU DC check (default) | Morris 2014 backpropagation from negative nodes, one linear-scan Dijkstra per node on Morris's normal form (each link gets its own activation node and lower bound 0), as in CSTNU-Tool's `applyNormalForm` | `O(n m + n^3)`, i.e. `O(n^3)` for `m = O(n^2)`; proof in `stnu/morris.rs` | done |
 | STNU DC check, RUL⁻ | Cairo, Hunsberger and Rizzi 2018, with contingent activation points normalised to executable ones | `O(n m + k (m + k n) log n)` with a binary heap (paper: `O(mn + k^2 n + k n log n)`) | done; the AAAI 2022 speed-up (RUL2021) is open |
 | STNU DC check, cross-check | per-label backpropagation: Morris-style, one propagation per kind of negative in-edge, no normalisation | `O(n (k + 1) (m + n^2) log n)` | done |
-| Non-DC explanation | semi-reducible negative cycle collected while Morris's nested propagations unwind, derived edges expanded to original ones | metered; length not bounded polynomially | done |
+| Non-DC explanation | semi-reducible negative cycle collected while Morris's nested propagations unwind, derived edges expanded to original ones | metered; worst case exponential in `k` (magic loops, `3 * 2^k - 2` edges) | done |
 | Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | done |
 
 Two independent algorithms per question are a deliberate choice: they cross-check each other
@@ -297,9 +297,14 @@ structurally is still open.
   proven bounds (Morris 2014, RUL⁻), but the dispatchable network still comes from the
   closure; Morris's dispatchable variant (inserting the intermediate edges) or FD_STNU
   (Hunsberger and Posenato 2023) would give a bounded one.
-- Morris 2014's normalisation: the paper was not available. The crate follows the
-  description in Hunsberger and Posenato (2023, section 2.1.1) with its own split of
-  activation points; this should be compared with the paper before citing it publicly.
+- Morris 2014 itself was not available. The implementation follows its description in
+  Hunsberger and Posenato (2023, section 2.1.1) and CSTNU-Tool's `applyMorris2014`,
+  `applyNormalForm` and `morris2014DCBackpropagation` (read, not copied); compare with the
+  paper before citing it publicly.
+- Explanations: a semi-reducible cycle can need exponentially many edges in `k` (magic
+  loops), so building one is metered and may exhaust a budget the verdict fits. Default:
+  expand fully under the budget. Alternative: return the nested form (derived edges as
+  references to sub-paths), or use the SRN-cycle finder of Hunsberger and Posenato (TIME 2024).
 - Whether the onboard network must be minimal (filtered ESTNU) to fit fixed capacities; today
   an STNU's dispatchable network has up to `n^2` edges plus `n k` waits.
 - Dispatcher policy: `step` executes as soon as possible. Whether flight use needs other

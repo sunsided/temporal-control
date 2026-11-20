@@ -71,7 +71,10 @@ impl LabelledEdge {
 /// The cycle is a certificate in the sense of [`NegativeCycle`](crate::NegativeCycle): keeping
 /// only the requirement bounds it names (and all contingent links) still gives a network that
 /// is not dynamically controllable, which the tests check against independent checkers. It is
-/// not necessarily simple or minimal.
+/// not necessarily simple or minimal, and edges may repeat: an indivisible cycle can need
+/// `3 * 2^k - 2` edges for `k` links (the *magic loops* of Hunsberger, ICAART 2013), so
+/// building it is metered by the [`Budget`](crate::Budget) and can exhaust a budget the
+/// verdict alone would fit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SemiReducibleCycle {
     /// Edges in traversal order. Never empty.

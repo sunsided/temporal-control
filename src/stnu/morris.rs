@@ -4,20 +4,25 @@
 //!
 //! The labelled distance graph has one ordinary edge per requirement bound, and per contingent
 //! link `(A, l, u, C)` the lower-case edge `A -> C: c:l` and the upper-case edge `C -> A: C:-u`.
-//! The link's ordinary edges `A -> C: u` and `C -> A: -l` are not part of it, as in the rules of
-//! Morris and Muscettola (2005).
+//! The link's ordinary edges `A -> C: u` and `C -> A: -l` are not part of it, as in the graph
+//! of Cairo, Hunsberger and Rizzi (2018, section 2.2) and Hunsberger and Posenato (2023,
+//! section 2), and as in CSTNU-Tool's `Morris2014` ("Morris considers only the labeled value
+//! for contingent links").
 //!
-//! **Normalisation.** Backpropagation from a node needs its negative incoming edges to be
-//! either all ordinary or a single upper-case edge, so that one propagation with one label is
-//! exact (see *Unsuitable edges*). As reported by Hunsberger and Posenato (Information and
-//! Computation 293, 2023, section 2.1.1), Morris's algorithm establishes this with an `O(n)`
-//! pre-processing step. The original paper was not available while writing this; the step
-//! used here is: each link `i` gets its own activation node `A'_i`, tied to `A_i` by two
-//! zero-weight ordinary edges, and its labelled edges attach to `A'_i`. Then `A'_i` has
-//! exactly one negative incoming edge (the upper-case one), and every other node has only
-//! ordinary negative incoming edges, because derived edges are never negative. Under
-//! instantaneous reaction the split network is DC iff the original is: `A'_i` executes at the
-//! tick of `A_i`, also when `A_i` is contingent.
+//! **Normal form.** Backpropagation from a node needs its negative incoming edges to be either
+//! all ordinary or a single upper-case edge, so that one propagation with one label is exact
+//! (see *Unsuitable edges*); Hunsberger and Posenato (Information and Computation 293, 2023,
+//! section 2.1.1) report that Morris's algorithm establishes this with an `O(n)`
+//! pre-processing step. That step is Morris's normal form, in which every contingent link has
+//! lower bound zero: each link `i` gets its own activation node `A'_i = A_i + l_i`, tied to
+//! `A_i` by the ordinary edges `A_i -> A'_i: l_i` and `A'_i -> A_i: -l_i`, and the link becomes
+//! `A'_i => C_i` in `[0, u_i - l_i]`. All other edges stay on `A_i`. This follows CSTNU-Tool's
+//! `STNU::applyNormalForm`, which `applyMorris2014` runs first; the CPAIOR 2014 paper itself
+//! was not available while writing this. Afterwards `A'_i` has exactly one negative incoming
+//! edge (the upper-case one), and every other node has only ordinary negative incoming edges,
+//! because derived edges are never negative. Under instantaneous reaction the normal form is
+//! DC iff the original is: `A'_i` executes `l_i` ticks after `A_i`, also when `A_i` is
+//! contingent.
 //!
 //! # Algorithm
 //!
@@ -35,15 +40,16 @@
 //!
 //! **Unsuitable edges.** In a propagation seeded with the upper-case edge of link `c`, the
 //! lower-case edge of `c` is skipped: the cross-case rule needs distinct labels, because the
-//! same link cannot take its minimum and its maximum duration. Thanks to the normalisation the
+//! same link cannot take its minimum and its maximum duration. Thanks to the normal form the
 //! label is a property of the source (one upper-case seed, or none), so the test is exact with
-//! one distance per node.
+//! one distance per node. It is the same test as CSTNU-Tool's: a lower-case edge is unsuitable
+//! iff it leaves the source.
 //!
 //! The network is DC iff every negative node's `backprop` completes.
 //!
 //! # Cost
 //!
-//! Let `n' = n + k` (at most `2n`) be the node count after normalisation and `m` the number
+//! Let `n' = n + k` (at most `2n`) be the node count in normal form and `m` the number
 //! of requirement bounds.
 //!
 //! 1. Each node runs at most one propagation: a finished `backprop` returns at once, and an
@@ -66,9 +72,13 @@
 //! The cycle consists of one negative path per nested call, from the node that interrupted it
 //! to its source. It is collected while the calls unwind. Derived edges are then expanded,
 //! through the stored shortest-path tree of the propagation that created them, into the
-//! original edges, and the normalisation edges are dropped (they have weight zero and join
-//! `A'_i` to `A_i`). The expansion is metered by the step budget; its length is not bounded
-//! polynomially here.
+//! normal-form edges, and these are mapped back: `A'_i` is `A_i`, the two tie edges are dropped,
+//! and the labelled edges get their original weights `l_i` and `-u_i`. The total is unchanged,
+//! because a cycle enters `A'_i` by the tie (`+l_i`) or the upper-case edge (`l_i - u_i`) and
+//! leaves it by the tie (`-l_i`) or the lower-case edge (`0`); each of the four combinations
+//! weighs the same before and after the mapping. The expansion is metered by the step budget.
+//! Its length is not polynomially bounded: an indivisible semi-reducible negative cycle may
+//! need `3 * 2^k - 2` edges (the *magic loops* of Hunsberger, ICAART 2013), repeating edges.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -78,14 +88,14 @@ use crate::budget::Meter;
 use crate::stn::{Bound, ConstraintId, CycleEdge, steps};
 use crate::{Budget, Error, Ticks};
 
-/// Where an edge of the normalised graph comes from.
+/// Where an edge of the normal-form graph comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Origin {
-    /// An original edge of the labelled distance graph.
+    /// An edge of the labelled distance graph; in normal form, so labelled edges of link `i`
+    /// attach to its own activation node and weigh `0` and `l_i - u_i`.
     Original(LabelledEdge),
-    /// One of the two zero-weight edges between a link's own activation node and its
-    /// activation point.
-    Split,
+    /// One of the two normal-form tie edges `A_i -> A'_i: l_i` and `A'_i -> A_i: -l_i`.
+    Tie,
     /// A non-negative bypass edge `u -> s` found by `backprop(s)`; expands through `s`'s tree.
     Derived,
 }
@@ -192,7 +202,7 @@ pub(super) fn explain(stnu: &Stnu, budget: &Budget) -> Result<SemiReducibleCycle
 }
 
 impl<'m> Graph<'m> {
-    /// Builds the normalised labelled distance graph of `stnu`.
+    /// Builds the labelled distance graph of `stnu` in normal form.
     ///
     /// # Errors
     ///
@@ -233,13 +243,16 @@ impl<'m> Graph<'m> {
 
         for (i, link) in stnu.links.iter().enumerate() {
             let (a, own, x) = (link.activation.0, n + i, link.contingent.0);
-            let neg_hi = link.hi.checked_neg().ok_or(Error::Overflow)?;
-            add(a, own, Ticks::ZERO, Origin::Split);
-            add(own, a, Ticks::ZERO, Origin::Split);
+            // Normal form: `own = A + l` rigidly, and the link `own => C` lasts `[0, u - l]`.
+            let neg_lo = link.lo.checked_neg().ok_or(Error::Overflow)?;
+            let span = link.hi.checked_sub(link.lo).ok_or(Error::Overflow)?;
+            add(a, own, link.lo, Origin::Tie);
+            add(own, a, neg_lo, Origin::Tie);
             let lower = LabelledEdge::LowerCase(ContingentId(i));
-            add(own, x, link.lo, Origin::Original(lower));
+            add(own, x, Ticks::ZERO, Origin::Original(lower));
             let upper = LabelledEdge::UpperCase(ContingentId(i));
-            add(x, own, neg_hi, Origin::Original(upper));
+            let neg_span = span.checked_neg().ok_or(Error::Overflow)?;
+            add(x, own, neg_span, Origin::Original(upper));
         }
 
         meter.spend(steps(nodes)?)?;
@@ -302,7 +315,7 @@ impl<'m> Graph<'m> {
     ///
     /// # Errors
     ///
-    /// [`Error::Internal`] if the normalisation invariant (all ordinary, or one upper-case
+    /// [`Error::Internal`] if the normal-form invariant (all ordinary, or one upper-case
     /// edge) does not hold.
     fn seed(&self, source: usize) -> Result<Search, Error> {
         let nodes = self.incoming.len();
@@ -402,7 +415,7 @@ impl<'m> Graph<'m> {
                         .ok_or(Error::Overflow)?;
                     edges.push(edge);
                 }
-                Origin::Split => {}
+                Origin::Tie => {}
                 Origin::Derived => {
                     let path = walk(&self.trees[head], e.from, head)?;
                     pending.extend(path.into_iter().rev());
