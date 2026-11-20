@@ -1,8 +1,8 @@
 //! DC checkers on arbitrary small STNUs: no panic, and every checker that answers agrees.
 //!
-//! Runs every [`DcAlgorithm`] through `Stnu::check_controllability_with` and the closure
-//! through `Stnu::dispatchable`, under a finite budget (the closure has no proven round
-//! bound). Budget errors are skipped; `Error::Internal` is a failure. A DC verdict's
+//! Runs every [`DcAlgorithm`] through `Stnu::check_controllability_with` and every
+//! [`DispatchAlgorithm`] through `Stnu::dispatchable_with`, under a finite budget (the closure
+//! has no proven round bound). Budget errors are skipped; `Error::Internal` is a failure. A DC verdict's
 //! dispatchable network must load into a dispatcher and survive an encoding round trip.
 
 #![no_main]
@@ -10,8 +10,8 @@
 use libfuzzer_sys::arbitrary::{self, Arbitrary};
 use libfuzzer_sys::fuzz_target;
 use temporal_control::{
-    Budget, Controllability, DcAlgorithm, DispatchableNetwork, Dispatcher, Error, Stnu, Ticks,
-    TimePoint,
+    Budget, Controllability, DcAlgorithm, DispatchAlgorithm, DispatchableNetwork, Dispatcher,
+    Error, Stnu, Ticks, TimePoint,
 };
 
 /// Largest number of time points a fuzzed STNU gets.
@@ -24,10 +24,18 @@ const BUDGET: Budget = Budget {
 };
 
 /// Every checker behind `check_controllability_with`.
-const ALGORITHMS: [DcAlgorithm; 3] = [
+const ALGORITHMS: [DcAlgorithm; 4] = [
     DcAlgorithm::Morris2014,
     DcAlgorithm::RulMinus,
+    DcAlgorithm::Rul2021,
     DcAlgorithm::PerLabelBackprop,
+];
+
+/// Every algorithm behind `dispatchable_with`.
+const DISPATCHERS: [DispatchAlgorithm; 3] = [
+    DispatchAlgorithm::Minimal,
+    DispatchAlgorithm::Morris2014,
+    DispatchAlgorithm::Closure,
 ];
 
 /// Position of `algorithm` in [`ALGORITHMS`]; the exhaustive `match` makes a new
@@ -37,7 +45,18 @@ const fn position(algorithm: DcAlgorithm) -> usize {
     match algorithm {
         DcAlgorithm::Morris2014 => 0,
         DcAlgorithm::RulMinus => 1,
-        DcAlgorithm::PerLabelBackprop => 2,
+        DcAlgorithm::Rul2021 => 2,
+        DcAlgorithm::PerLabelBackprop => 3,
+    }
+}
+
+/// Position of `algorithm` in [`DISPATCHERS`]; a completeness guard like [`position`].
+#[expect(dead_code, reason = "compile-time completeness guard only")]
+const fn dispatcher_position(algorithm: DispatchAlgorithm) -> usize {
+    match algorithm {
+        DispatchAlgorithm::Minimal => 0,
+        DispatchAlgorithm::Morris2014 => 1,
+        DispatchAlgorithm::Closure => 2,
     }
 }
 
@@ -67,14 +86,16 @@ fuzz_target!(|ops: Vec<Op>| {
         }
     }
 
-    let closure = stnu.dispatchable(&BUDGET);
+    for algorithm in DISPATCHERS {
+        let result = stnu.dispatchable_with(algorithm, &BUDGET);
 
-    if let Ok(Controllability::Controllable(net)) = &closure {
-        check_network(net);
-    }
+        if let Ok(Controllability::Controllable(net)) = &result {
+            check_network(net);
+        }
 
-    if let Some(dc) = answer(&closure.map(|c| matches!(c, Controllability::Controllable(_)))) {
-        verdicts.push(("closure".into(), dc));
+        if let Some(dc) = answer(&result.map(|c| matches!(c, Controllability::Controllable(_)))) {
+            verdicts.push((format!("{algorithm:?}"), dc));
+        }
     }
 
     assert!(
@@ -126,7 +147,7 @@ fn answer(result: &Result<bool, Error>) -> Option<bool> {
     }
 }
 
-/// A dispatchable network from the closure loads into a dispatcher and round-trips.
+/// A dispatchable network loads into a dispatcher and round-trips.
 fn check_network(net: &DispatchableNetwork) {
     let mut d = Dispatcher::<MAX_POINTS, 1024>::EMPTY;
     d.load(net.points(), net.edges(), net.waits())

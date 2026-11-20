@@ -21,7 +21,7 @@
 //! | 20 | `21 n` | point records |
 //! | `20 + 21 n` | `16 e` | edge records |
 //! | `20 + 21 n + 16 e` | `16 w` | wait records |
-//! | end - 4 | 4 | CRC-32/ISO-HDLC ([`crc32`]) of every byte before it, `u32` |
+//! | end - 4 | 4 | CRC-32/ISO-HDLC ([`crc32()`]) of every byte before it, `u32` |
 //!
 //! Records (point indices are `u32`, ticks `i64`):
 //!
