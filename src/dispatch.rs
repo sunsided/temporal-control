@@ -44,14 +44,18 @@
 //! [`Dispatcher::step`] is `O(N * degree)` per executed point. Internal handles are stored in
 //! an [`Index`] type (`usize` by default, or `u16`/`u32`).
 
+pub mod encoding;
 mod index;
 #[cfg(feature = "alloc")]
 mod network;
+mod source;
 
 use core::fmt;
 
 use crate::{Ticks, TimePoint};
+use source::{Slices, Source};
 
+pub use encoding::{DecodeError, EncodeError};
 pub use index::Index;
 #[cfg(feature = "alloc")]
 pub use network::DispatchableNetwork;
@@ -355,10 +359,58 @@ impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
         edges: &[DispatchEdge],
         waits: &[Wait],
     ) -> Result<(), DispatchError> {
-        validate::<I>(points, edges, waits, N, E)?;
+        self.load_from(&Slices {
+            points,
+            edges,
+            waits,
+        })
+    }
+
+    /// Validates an encoded dispatchable network and loads it in place, without copying it
+    /// anywhere first.
+    ///
+    /// `bytes` must be exactly one encoding as written by [`encoding::encode_into`] (see
+    /// [`encoding`] for the format). Header, length and CRC-32 are checked first, then every
+    /// record, then the network as in [`Self::load`]. As there, a rejected encoding leaves the
+    /// dispatcher exactly as it was. Never panics on any input.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use temporal_control::dispatch::encoding;
+    /// use temporal_control::{DecodeError, DispatchEdge, Dispatcher, PointKind, Ticks, TimePoint};
+    ///
+    /// let points = [PointKind::Executable; 2];
+    /// let edges = [DispatchEdge { from: TimePoint(0), to: TimePoint(1), weight: Ticks(10) }];
+    /// let mut buf = [0u8; 128];
+    /// let len = encoding::encode_into(&points, &edges, &[], &mut buf).expect("fits");
+    ///
+    /// let mut d = Dispatcher::<4, 8>::EMPTY;
+    /// d.load_encoded(&buf[..len]).expect("valid");
+    /// assert_eq!(d.window(TimePoint(1)), Some((None, None)));
+    ///
+    /// buf[30] ^= 0x10;
+    /// assert_eq!(d.load_encoded(&buf[..len]), Err(DecodeError::ChecksumMismatch));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Any [`DecodeError`]; [`DecodeError::Network`] wraps the errors of [`Self::load`].
+    pub fn load_encoded(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        let encoded = encoding::Encoded::parse(bytes)?;
+        self.load_from(&encoded).map_err(DecodeError::Network)
+    }
+
+    /// Validates `net` and loads it in place; see [`Self::load`].
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::load`].
+    fn load_from(&mut self, net: &impl Source) -> Result<(), DispatchError> {
+        source::validate::<I>(net, N, E)?;
 
         self.clear();
-        let filled = self.fill(points, edges, waits);
+        let filled = self.fill(net);
 
         if filled.is_err() {
             self.clear();
@@ -774,22 +826,18 @@ impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
     ///
     /// # Errors
     ///
-    /// [`DispatchError::IndexTypeTooSmall`] if a value does not fit `I`. Validation already
-    /// rules this out; the error replaces what would otherwise be a panic path, and the caller
-    /// clears the half-filled state.
-    fn fill(
-        &mut self,
-        points: &[PointKind],
-        edges: &[DispatchEdge],
-        waits: &[Wait],
-    ) -> Result<(), DispatchError> {
-        for (slot, &kind) in self.kinds.iter_mut().zip(points) {
-            *slot = Kind::narrow(kind)?;
+    /// [`DispatchError::IndexTypeTooSmall`] if a value does not fit `I`, or
+    /// [`DispatchError::InvalidNetwork`] if a record cannot be read. Validation already rules
+    /// both out; the errors replace what would otherwise be panic paths, and the caller clears
+    /// the half-filled state.
+    fn fill(&mut self, net: &impl Source) -> Result<(), DispatchError> {
+        for (p, slot) in self.kinds.iter_mut().take(net.point_count()).enumerate() {
+            *slot = Kind::narrow(record(net.point(p))?)?;
         }
 
-        self.n = points.len();
-        self.count_entries(edges, waits)?;
-        self.fill_entries(edges, waits)
+        self.n = net.point_count();
+        self.count_entries(net)?;
+        self.fill_entries(net)
     }
 
     /// Sets `start[p]` to the end of `p`'s entry range, `m` to the entry count, and `pending`
@@ -798,12 +846,9 @@ impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
     /// # Errors
     ///
     /// As for [`Self::fill`].
-    fn count_entries(
-        &mut self,
-        edges: &[DispatchEdge],
-        waits: &[Wait],
-    ) -> Result<(), DispatchError> {
-        for e in edges {
+    fn count_entries(&mut self, net: &impl Source) -> Result<(), DispatchError> {
+        for i in 0..net.edge_count() {
+            let e = record(net.edge(i))?;
             increment(&mut self.start[e.from.0])?;
             increment(&mut self.start[e.to.0])?;
 
@@ -812,8 +857,8 @@ impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
             }
         }
 
-        for w in waits {
-            increment(&mut self.start[w.waiter.0])?;
+        for i in 0..net.wait_count() {
+            increment(&mut self.start[record(net.wait(i))?.waiter.0])?;
         }
 
         let mut end = 0usize;
@@ -838,12 +883,9 @@ impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
     /// # Errors
     ///
     /// As for [`Self::fill`].
-    fn fill_entries(
-        &mut self,
-        edges: &[DispatchEdge],
-        waits: &[Wait],
-    ) -> Result<(), DispatchError> {
-        for w in waits.iter().rev() {
+    fn fill_entries(&mut self, net: &impl Source) -> Result<(), DispatchError> {
+        for i in (0..net.wait_count()).rev() {
+            let w = record(net.wait(i))?;
             let entry = Entry::Wait {
                 contingent: index(w.contingent.0)?,
                 delay: w.delay,
@@ -851,7 +893,8 @@ impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
             self.push_back(w.waiter.0, entry);
         }
 
-        for e in edges.iter().rev() {
+        for i in (0..net.edge_count()).rev() {
+            let e = record(net.edge(i))?;
             let (u, v) = (e.from.0, e.to.0);
             let lower = Entry::Lower {
                 target: index(u)?,
@@ -874,6 +917,15 @@ impl<const N: usize, const E: usize, I: Index> Dispatcher<N, E, I> {
         self.start[owner] = slot;
         self.entries[slot.to_usize()] = entry;
     }
+}
+
+/// Unwraps a record read from a validated [`Source`].
+///
+/// # Errors
+///
+/// [`DispatchError::InvalidNetwork`] if it could not be read.
+fn record<T>(value: Option<T>) -> Result<T, DispatchError> {
+    value.ok_or(DispatchError::InvalidNetwork)
 }
 
 /// Converts `value` to the index type.
@@ -911,82 +963,4 @@ fn ok_or_violated(ok: bool, p: usize) -> Result<(), DispatchError> {
     } else {
         Err(DispatchError::ConstraintViolated(TimePoint(p)))
     }
-}
-
-/// Validates a dispatchable network against capacities `n_cap` and `e_cap` and index type `I`.
-///
-/// # Errors
-///
-/// [`DispatchError::CapacityExceeded`], [`DispatchError::IndexTypeTooSmall`] or
-/// [`DispatchError::InvalidNetwork`], checked in that order.
-fn validate<I: Index>(
-    points: &[PointKind],
-    edges: &[DispatchEdge],
-    waits: &[Wait],
-    n_cap: usize,
-    e_cap: usize,
-) -> Result<(), DispatchError> {
-    let entries = edges
-        .len()
-        .checked_mul(2)
-        .and_then(|e| e.checked_add(waits.len()))
-        .ok_or(DispatchError::CapacityExceeded)?;
-
-    if points.len() > n_cap || entries > e_cap {
-        return Err(DispatchError::CapacityExceeded);
-    }
-
-    index::<I>(points.len())?;
-    index::<I>(entries)?;
-
-    let n = points.len();
-    let valid = points
-        .iter()
-        .enumerate()
-        .all(|(p, k)| valid_point(points, p, *k))
-        && edges.iter().all(|e| valid_edge(e, n))
-        && waits.iter().all(|w| valid_wait(points, w));
-
-    if !valid {
-        return Err(DispatchError::InvalidNetwork);
-    }
-
-    Ok(())
-}
-
-/// Whether point `p` of kind `kind` is well-formed, including an acyclic activation chain.
-fn valid_point(points: &[PointKind], p: usize, kind: PointKind) -> bool {
-    let PointKind::Contingent { lo, hi, .. } = kind else {
-        return true;
-    };
-
-    if lo <= Ticks::ZERO || hi < lo {
-        return false;
-    }
-
-    let mut current = p;
-
-    for _ in 0..points.len() {
-        match points.get(current) {
-            Some(PointKind::Contingent { activation, .. }) => current = activation.0,
-            Some(PointKind::Executable) => return true,
-            None => return false,
-        }
-    }
-
-    false
-}
-
-/// Whether an edge has valid endpoints and is not a negative self-loop.
-fn valid_edge(e: &DispatchEdge, n: usize) -> bool {
-    e.from.0 < n && e.to.0 < n && (e.from != e.to || e.weight >= Ticks::ZERO)
-}
-
-/// Whether a wait goes from an executable point to a contingent point.
-fn valid_wait(points: &[PointKind], w: &Wait) -> bool {
-    matches!(points.get(w.waiter.0), Some(PointKind::Executable))
-        && matches!(
-            points.get(w.contingent.0),
-            Some(PointKind::Contingent { .. })
-        )
 }

@@ -1,6 +1,7 @@
 //! Integration and property tests for `temporal-control`.
 
 mod dispatch;
+mod encoding;
 mod examples;
 mod generators;
 mod incremental;

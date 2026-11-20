@@ -13,10 +13,13 @@
 //!   [`Stnu::check_controllability`], Morris's `O(n^3)` algorithm; and the others in
 //!   [`DcAlgorithm`]). A negative verdict carries a [`SemiReducibleCycle`] naming the
 //!   requirements and contingent extremes that conflict.
-//! - An onboard [`Dispatcher`] with fixed capacity that needs no `alloc`.
-//! - Planned: a compact checksummed encoding of dispatchable networks.
+//! - An onboard [`Dispatcher`] with fixed capacity that needs no `alloc`, loads in place from
+//!   a `const` [`Dispatcher::EMPTY`], and stores handles in a chosen [`Index`] type.
+//! - A compact, versioned, CRC-32-checked encoding of dispatchable networks
+//!   ([`dispatch::encoding`]) that the dispatcher validates and loads directly from the bytes.
 //!
-//! Everything except [`Dispatcher`] and its input types needs the default `alloc` feature.
+//! Everything except [`Dispatcher`], the encoding and their input types needs the default
+//! `alloc` feature.
 //!
 //! All time values are integer [`Ticks`]. All arithmetic is checked, and every algorithm runs
 //! under an explicit [`Budget`]. Exhausting a budget yields [`Error::BudgetExhausted`], never a
@@ -66,7 +69,9 @@ mod time_point;
 pub use budget::Budget;
 #[cfg(feature = "alloc")]
 pub use dispatch::DispatchableNetwork;
-pub use dispatch::{DispatchEdge, DispatchError, Dispatcher, Index, PointKind, Wait};
+pub use dispatch::{
+    DecodeError, DispatchEdge, DispatchError, Dispatcher, EncodeError, Index, PointKind, Wait,
+};
 pub use error::Error;
 #[cfg(feature = "alloc")]
 pub use stn::{

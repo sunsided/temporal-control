@@ -276,6 +276,46 @@ is not necessarily simple or minimal. Checked property: keeping only its require
 intermediate edges of the reduction, not inputs. Matching CSTNU-Tool's explanations
 structurally is still open.
 
+### 7.1 Dispatchable network encoding (version 1)
+
+The uplink format of a `DispatchableNetwork` (`dispatch::encoding`, rustdoc has the same
+table). All integers are little-endian and fixed-width, with no padding:
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | magic `TCDN` |
+| 4 | 2 | version `u16` = 1 |
+| 6 | 2 | reserved `u16` = 0 |
+| 8 | 4 | point count `n`, `u32` |
+| 12 | 4 | edge count `e`, `u32` |
+| 16 | 4 | wait count `w`, `u32` |
+| 20 | `21 n` | points: tag `u8` (0 executable, 1 contingent), activation `u32`, `lo` `i64`, `hi` `i64`; executable records are zero after the tag |
+| `20 + 21 n` | `16 e` | edges `t_to - t_from <= weight`: `from` `u32`, `to` `u32`, `weight` `i64` |
+| `20 + 21 n + 16 e` | `16 w` | waits: `waiter` `u32`, `contingent` `u32`, `delay` `i64` |
+| end - 4 | 4 | CRC-32/ISO-HDLC of all preceding bytes, `u32` |
+
+Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Design choices:
+
+- Fixed-width records give random access to record `i`, so the onboard validator follows
+  activation chains in the received bytes and loads the dispatcher without a copy or `alloc`.
+  A variable-length form (one byte per executable point) would be smaller but would need an
+  index or a second buffer.
+- `u32` indices on the wire, independent of the dispatcher's `Index` type; a `u16`
+  dispatcher rejects networks that do not fit it (`DispatchError::IndexTypeTooSmall`).
+- One canonical encoding per network: the reserved field and executable payloads must be
+  zero, unknown tags are rejected. Decoding then re-encoding gives the same bytes (tested).
+- CRC-32/ISO-HDLC (zlib's), table built at compile time, no dependency. It detects every
+  burst of up to 32 bits, so every single-bit error and every truncation (also caught by the
+  length check) is rejected; it is an integrity check, not authentication. If uplink
+  authenticity matters, a MAC belongs in the transport layer.
+- Decoding checks, each with its own `DecodeError`: minimum length, magic, version (before
+  the checksum, so a later version may move it), exact length from the counts (computed in
+  `u64`, safe on 32-bit targets), checksum, canonical form, then all dispatcher validation
+  (`DecodeError::Network`). A rejected encoding leaves a loaded dispatcher unchanged.
+- The encoder (`encode_into` into a caller buffer, no `alloc`; `DispatchableNetwork::encode`
+  with `alloc`) does not validate; `DispatchableNetwork::decode` lets the ground run the exact
+  onboard checks before uplink.
+
 ## 8. Testing strategy
 
 | Layer | What | Status |
