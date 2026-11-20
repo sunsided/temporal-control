@@ -8,12 +8,13 @@
 //! - Simple Temporal Networks ([`Stn`]): consistency checking with a negative-cycle explanation,
 //!   minimal networks, incremental consistency ([`IncrementalStn`]) and filtered dispatchable
 //!   networks ([`Stn::dispatchable`]).
-//! - STNs with Uncertainty ([`Stnu`]): dynamic controllability by two independent checkers
-//!   ([`Stnu::dispatchable`], which also yields an extended dispatchable network with waits,
-//!   and [`Stnu::check_controllability`]).
+//! - STNs with Uncertainty ([`Stnu`]): dynamic controllability by independent checkers
+//!   ([`Stnu::dispatchable`], which also yields an extended dispatchable network with waits;
+//!   [`Stnu::check_controllability`], Morris's `O(n^3)` algorithm; and the others in
+//!   [`DcAlgorithm`]). A negative verdict carries a [`SemiReducibleCycle`] naming the
+//!   requirements and contingent extremes that conflict.
 //! - An onboard [`Dispatcher`] with fixed capacity that needs no `alloc`.
-//! - Planned: explanations of non-controllability, a compact checksummed encoding of
-//!   dispatchable networks.
+//! - Planned: a compact checksummed encoding of dispatchable networks.
 //!
 //! Everything except [`Dispatcher`] and its input types needs the default `alloc` feature.
 //!
@@ -73,6 +74,9 @@ pub use stn::{
     Schedule, Stn, Verdict,
 };
 #[cfg(feature = "alloc")]
-pub use stnu::{ContingentId, ContingentLink, Controllability, Stnu};
+pub use stnu::{
+    ContingentId, ContingentLink, Controllability, DcAlgorithm, LabelledEdge, SemiReducibleCycle,
+    Stnu,
+};
 pub use ticks::Ticks;
 pub use time_point::TimePoint;

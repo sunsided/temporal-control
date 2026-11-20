@@ -64,7 +64,7 @@ pub(super) fn run(
 
     loop {
         let Some(changed) = g.round(stnu, &mut meter)? else {
-            return Ok(Controllability::Uncontrollable);
+            return super::morris::explain(stnu, budget).map(Controllability::Uncontrollable);
         };
 
         if !changed {

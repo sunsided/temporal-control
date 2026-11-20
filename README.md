@@ -13,9 +13,10 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | Incremental STN consistency, `O(n^2)` per constraint | done |
 | Dispatchable STN by dominated-edge filtering (minimal except for edge copies on simultaneous points) | done |
 | STNU dynamic controllability: labelled closure with extended dispatchable network | done |
-| STNU dynamic controllability: Morris backpropagation (second checker) | done |
+| STNU dynamic controllability: Morris 2014 `O(n^3)` backpropagation (default checker) | done |
+| STNU dynamic controllability: per-label backpropagation (cross-check) | done |
+| Explanations of non-controllability (semi-reducible negative cycles) | done |
 | Onboard dispatcher, `no_std` without `alloc`, fixed capacity | done |
-| Explanations of non-controllability | planned |
 | Compact checksummed encoding of dispatchable networks | planned |
 | Differential tests against CSTNU-Tool, fuzzing, Kani harnesses | planned |
 

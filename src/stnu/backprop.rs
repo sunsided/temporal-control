@@ -1,4 +1,8 @@
-//! Dynamic controllability by backward propagation from negative nodes (Morris 2014).
+//! Dynamic controllability by per-label backpropagation from negative nodes.
+//!
+//! A variant of Morris's 2014 algorithm (see [`super::morris`] for the one-propagation-per-node form) that keeps
+//! the network as it is instead of normalising it, and pays for that with one propagation per
+//! kind of negative incoming edge. It is kept as an independent cross-check.
 //!
 //! Works on the labelled distance graph (see [`super::closure`]) stored as incoming-edge lists.
 //! A *negative node* has an incoming edge of negative weight. For each negative node `s`,
@@ -19,9 +23,8 @@
 //!
 //! Cost: every node is a source at most once and runs at most `k + 1` propagations. Each source
 //! adds at most `n` derived edges, so there are `m' <= m + n^2` edges, and a propagation costs
-//! `O(m' log n)`. The worst case is `O(n (k + 1) (m + n^2) log n)`; Morris's original bound
-//! of `O(n^3)` needs the single-propagation-per-source variant, which this one trades for an
-//! exact unsuitability test.
+//! `O(m' log n)`. The worst case is `O(n (k + 1) (m + n^2) log n)`; [`super::morris`] gets
+//! Morris's `O(n^3)` by normalising the network so that one propagation per source is exact.
 
 use alloc::collections::BinaryHeap;
 use alloc::vec;
@@ -77,7 +80,7 @@ struct Graph<'m> {
     meter: &'m mut Meter,
 }
 
-/// Checks dynamic controllability with Morris's backpropagation.
+/// Checks dynamic controllability with per-label backpropagation.
 ///
 /// # Errors
 ///
@@ -88,7 +91,7 @@ pub(super) fn run(stnu: &Stnu, budget: &Budget) -> Result<Controllability<()>, E
 
     for s in 0..g.incoming.len() {
         if g.negative[s] && !g.backprop(s)? {
-            return Ok(Controllability::Uncontrollable);
+            return super::morris::explain(stnu, budget).map(Controllability::Uncontrollable);
         }
     }
 

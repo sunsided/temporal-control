@@ -19,12 +19,22 @@
 //! ```mermaid
 //! graph LR
 //!     stnu["Stnu"] -->|"dispatchable (labelled closure)"| v["Controllable(DispatchableNetwork) or Uncontrollable"]
-//!     stnu -->|"check_controllability (Morris 2014 backprop)"| c["Controllable or Uncontrollable"]
+//!     stnu -->|"check_controllability (Morris 2014, O(n^3))"| c["Controllable or Uncontrollable"]
+//!     stnu -->|"check_controllability_with (per-label backprop)"| c
 //!     v --> d["Dispatcher (onboard)"]
+//!     c -->|"Uncontrollable"| e["SemiReducibleCycle"]
 //! ```
+//!
+//! Every checker explains a negative verdict with a [`SemiReducibleCycle`]. The checkers other
+//! than [`DcAlgorithm::Morris2014`] take it from that checker, and report [`Error::Internal`]
+//! if it disagrees, so a negative verdict is always confirmed by two algorithms.
 
 mod backprop;
 mod closure;
+mod explanation;
+mod morris;
+
+pub use explanation::{LabelledEdge, SemiReducibleCycle};
 
 use alloc::vec::Vec;
 
@@ -55,11 +65,25 @@ pub struct ContingentLink {
 pub enum Controllability<T> {
     /// The network is dynamically controllable; the payload is a derived structure.
     Controllable(T),
-    /// No dynamic strategy satisfies every requirement in every situation.
-    ///
-    /// shortcut: no explanation (semi-reducible negative cycle) yet; add one when operators
-    /// need to see which contingent links and requirements conflict.
-    Uncontrollable,
+    /// No dynamic strategy satisfies every requirement in every situation; the payload names
+    /// the requirements and contingent extremes that conflict.
+    Uncontrollable(SemiReducibleCycle),
+}
+
+/// Which dynamic-controllability checker [`Stnu::check_controllability_with`] runs.
+///
+/// All of them decide the same question under the same (instantaneous-reaction) semantics;
+/// they differ in cost and serve as cross-checks for each other.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DcAlgorithm {
+    /// Morris (2014): backpropagation from negative nodes, one propagation per node,
+    /// `O(n m + n^3)` time, explains negative verdicts itself.
+    #[default]
+    Morris2014,
+    /// Morris-style backpropagation without normalisation: one propagation per kind of
+    /// negative incoming edge, `O(n (k + 1) (m + n^2) log n)`. Kept as an independent
+    /// cross-check.
+    PerLabelBackprop,
 }
 
 /// A Simple Temporal Network with Uncertainty.
@@ -167,15 +191,17 @@ impl Stnu {
         self.requirements.time_point_count()
     }
 
-    /// Checks dynamic controllability with Morris's backpropagation from negative nodes.
+    /// Checks dynamic controllability with Morris's `O(n^3)` backpropagation from negative
+    /// nodes ([`DcAlgorithm::Morris2014`]).
     ///
     /// Independent of [`Stnu::dispatchable`]; both must agree, which the tests check. Use this
-    /// when only the verdict is needed: it keeps `O(n + m)` memory plus derived edges instead
-    /// of dense matrices. See the `backprop` module docs for the cost.
+    /// when only the verdict (and an explanation) is needed: it keeps `O(m + n^2)` memory in
+    /// the worst case instead of dense matrices. See the `morris` module docs for the
+    /// algorithm and the proof of its bound.
     ///
-    /// shortcut: [`Budget::max_cells`] is not applied here, and its allocations (adjacency
-    /// lists, up to `n^2` derived edges, the queue) abort on allocator failure; bound them
-    /// before running this onboard.
+    /// [`Budget::max_cells`] must admit `(n + k)^2` cells, the worst case of derived edges.
+    /// shortcut: the allocations themselves (adjacency lists, derived edges, search state)
+    /// abort on allocator failure; make them fallible before running this onboard.
     ///
     /// # Examples
     ///
@@ -190,15 +216,63 @@ impl Stnu {
     /// stnu.add_constraint(x, c, Some(Ticks(1)), Some(Ticks(2))).expect("exists");
     ///
     /// let verdict = stnu.check_controllability(&Budget::UNLIMITED).expect("within budget");
-    /// assert_eq!(verdict, Controllability::Uncontrollable);
+    /// let Controllability::Uncontrollable(cycle) = verdict else {
+    ///     panic!("not DC");
+    /// };
+    /// // X -> C: 2 (requirement), C -> A: -10 (C may take 10), A -> C: 1 (C may take 1),
+    /// // C -> X: -1 (requirement): the agent would have to know C before it happens.
+    /// assert!(cycle.weight() < Ticks::ZERO);
+    /// assert!(cycle.contingent_links().count() >= 1);
     /// ```
     ///
     /// # Errors
     ///
+    /// - [`Error::MemoryBudgetExceeded`] if `(n + k)^2` exceeds [`Budget::max_cells`].
     /// - [`Error::BudgetExhausted`] if the step budget runs out.
     /// - [`Error::Overflow`] if a path weight overflows `i64`.
     pub fn check_controllability(&self, budget: &Budget) -> Result<Controllability<()>, Error> {
-        backprop::run(self, budget)
+        morris::run(self, budget)
+    }
+
+    /// Checks dynamic controllability with the chosen `algorithm`.
+    ///
+    /// Every algorithm returns the same verdict. A negative verdict carries the explanation of
+    /// [`DcAlgorithm::Morris2014`], which then also runs (against a fresh copy of `budget`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use temporal_control::{Budget, Controllability, DcAlgorithm, Stnu, Ticks};
+    ///
+    /// let mut stnu = Stnu::new();
+    /// let a = stnu.add_time_point().expect("fits");
+    /// let c = stnu.add_contingent_link(a, Ticks(1), Ticks(10)).expect("valid");
+    /// let x = stnu.add_time_point().expect("fits");
+    /// // X within 2 ticks after C: wait for C, then execute.
+    /// stnu.add_constraint(c, x, Some(Ticks(0)), Some(Ticks(2))).expect("exists");
+    ///
+    /// for algorithm in [DcAlgorithm::Morris2014, DcAlgorithm::PerLabelBackprop] {
+    ///     let verdict = stnu.check_controllability_with(algorithm, &Budget::UNLIMITED);
+    ///     assert_eq!(verdict, Ok(Controllability::Controllable(())));
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::MemoryBudgetExceeded`] if an explanation is needed and `(n + k)^2` exceeds
+    ///   [`Budget::max_cells`] (or, for [`DcAlgorithm::Morris2014`], always in that case).
+    /// - [`Error::BudgetExhausted`] if the step budget runs out.
+    /// - [`Error::Overflow`] if a path weight overflows `i64`.
+    /// - [`Error::Internal`] if the explaining checker disagrees with the chosen one.
+    pub fn check_controllability_with(
+        &self,
+        algorithm: DcAlgorithm,
+        budget: &Budget,
+    ) -> Result<Controllability<()>, Error> {
+        match algorithm {
+            DcAlgorithm::Morris2014 => morris::run(self, budget),
+            DcAlgorithm::PerLabelBackprop => backprop::run(self, budget),
+        }
     }
 
     /// Checks dynamic controllability and derives a dispatchable extended STNU.
@@ -215,12 +289,16 @@ impl Stnu {
     /// with a brute-force oracle on small networks); the [`Budget`] bounds the work. Upgrade to
     /// the Hunsberger-Posenato `FD_STNU` algorithm if a proven bound matters.
     ///
+    /// A negative verdict carries the explanation of [`Stnu::check_controllability`], which
+    /// then also runs (against a fresh copy of `budget`).
+    ///
     /// # Errors
     ///
     /// - [`Error::MemoryBudgetExceeded`] if the matrices exceed [`Budget::max_cells`].
     /// - [`Error::OutOfMemory`] if the allocator refuses them.
     /// - [`Error::BudgetExhausted`] if the step budget runs out.
     /// - [`Error::Overflow`] if a path weight overflows `i64`.
+    /// - [`Error::Internal`] if the explaining checker finds the network DC.
     pub fn dispatchable(
         &self,
         budget: &Budget,

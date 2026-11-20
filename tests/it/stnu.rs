@@ -2,7 +2,8 @@
 
 use proptest::prelude::*;
 use temporal_control::{
-    Budget, Controllability, DispatchableNetwork, Error, Stnu, Ticks, TimePoint,
+    Bound, Budget, ContingentId, Controllability, DcAlgorithm, DispatchableNetwork, Error,
+    LabelledEdge, SemiReducibleCycle, Stnu, Ticks, TimePoint,
 };
 
 use crate::oracle::{self, Reaction};
@@ -22,17 +23,77 @@ fn estnu(stnu: &Stnu) -> Option<DispatchableNetwork> {
         .expect("closure fits the test budget")
     {
         Controllability::Controllable(net) => Some(net),
-        Controllability::Uncontrollable => None,
+        Controllability::Uncontrollable(_) => None,
     }
 }
 
-/// Verdict of [`Stnu::check_controllability`]. Panics on budget exhaustion.
-fn is_dc_backprop(stnu: &Stnu) -> bool {
-    let verdict = stnu.check_controllability(&TEST_BUDGET);
+/// Every checker behind [`Stnu::check_controllability_with`].
+const ALGORITHMS: [DcAlgorithm; 2] = [DcAlgorithm::Morris2014, DcAlgorithm::PerLabelBackprop];
+
+/// Verdict of `algorithm`. Panics on budget exhaustion or an internal disagreement.
+fn is_dc(stnu: &Stnu, algorithm: DcAlgorithm) -> bool {
+    let verdict = stnu.check_controllability_with(algorithm, &TEST_BUDGET);
     matches!(
-        verdict.expect("backprop fits the test budget"),
+        verdict.unwrap_or_else(|e| panic!("{algorithm:?}: {e}")),
         Controllability::Controllable(())
     )
+}
+
+/// The explanation of [`Stnu::check_controllability`], or `None` if DC.
+fn explanation(stnu: &Stnu) -> Option<SemiReducibleCycle> {
+    match stnu
+        .check_controllability(&TEST_BUDGET)
+        .expect("Morris fits the test budget")
+    {
+        Controllability::Controllable(()) => None,
+        Controllability::Uncontrollable(cycle) => Some(cycle),
+    }
+}
+
+/// Asserts that `cycle` chains, closes and has the stated negative weight in `stnu`.
+fn assert_cycle_closes(stnu: &Stnu, cycle: &SemiReducibleCycle) {
+    let edges: Vec<_> = cycle
+        .edges()
+        .iter()
+        .map(|e| e.resolve(stnu).expect("edge belongs to the network"))
+        .collect();
+    assert_ne!(edges.len(), 0, "empty cycle");
+
+    for (i, &(_, head, _)) in edges.iter().enumerate() {
+        let (tail, _, _) = edges[(i + 1) % edges.len()];
+        assert_eq!(head, tail, "edge {i} does not chain in {cycle:?}");
+    }
+
+    let weight: i64 = edges.iter().map(|e| e.2.0).sum();
+    assert_eq!(Ticks(weight), cycle.weight());
+    assert!(weight < 0, "{cycle:?}");
+}
+
+/// `stnu` with all time points and contingent links, but only the requirement bounds that
+/// `cycle` names.
+fn restrict(stnu: &Stnu, cycle: &SemiReducibleCycle) -> Stnu {
+    let mut out = Stnu::new();
+
+    for p in 0..stnu.time_point_count() {
+        match stnu.links().iter().find(|l| l.contingent.0 == p) {
+            Some(link) => out.add_contingent_link(link.activation, link.lo, link.hi),
+            None => out.add_time_point(),
+        }
+        .unwrap();
+    }
+
+    for edge in cycle.edges() {
+        if let LabelledEdge::Requirement(e) = edge {
+            let c = stnu.requirements().constraint(e.constraint).unwrap();
+            let (lo, hi) = match e.bound {
+                Bound::Upper => (None, c.hi),
+                Bound::Lower => (c.lo, None),
+            };
+            out.add_constraint(c.from, c.to, lo, hi).unwrap();
+        }
+    }
+
+    out
 }
 
 /// Contingent `A => C` in `[1, 10]` and executable `X` with `C - X` in `[lo, hi]` plus an
@@ -52,7 +113,17 @@ fn wait_example(lo: i64, hi: i64, deadline: Option<i64>) -> Stnu {
 /// `X` must precede `C` by 1 to 2 ticks without knowing `C`: not DC.
 #[test]
 fn must_precede_unknown_end_is_not_dc() {
-    assert!(estnu(&wait_example(1, 2, None)).is_none());
+    let stnu = wait_example(1, 2, None);
+    assert!(estnu(&stnu).is_none());
+
+    // The cycle needs the maximum duration of the link: X cannot wait for C.
+    let cycle = explanation(&stnu).expect("not DC");
+    assert_cycle_closes(&stnu, &cycle);
+    assert!(
+        cycle
+            .edges()
+            .contains(&LabelledEdge::UpperCase(ContingentId(0)))
+    );
 }
 
 /// `X` within 2 ticks before or after `C` and `X <= A + 8`: DC by waiting for `C` until `A + 8`.
@@ -108,7 +179,13 @@ fn rover(deadline: i64) -> Stnu {
 /// The rover deadline threshold, and dispatch under extreme durations.
 #[test]
 fn rover_deadline_threshold() {
-    assert!(estnu(&rover(39)).is_none());
+    let late = rover(39);
+    assert!(estnu(&late).is_none());
+    let cycle = explanation(&late).expect("not DC");
+    assert_cycle_closes(&late, &cycle);
+    assert_eq!(cycle.weight(), Ticks(-1), "one tick short");
+    assert!(estnu(&restrict(&late, &cycle)).is_none());
+
     let stnu = rover(40);
     let net = estnu(&stnu).expect("DC");
 
@@ -209,22 +286,28 @@ fn simulate_all(spec: &StnuSpec, net: &DispatchableNetwork, seed: u64) {
 }
 
 proptest! {
-    /// Closure and backpropagation agree with the brute-force game under same-tick reaction.
+    /// Every checker agrees with the brute-force game under same-tick reaction.
     #[test]
     fn checkers_match_oracle(spec in small_stnu()) {
         let expected = oracle::is_dc(&spec, Reaction::Instant);
         let stnu = spec.build();
         prop_assert_eq!(estnu(&stnu).is_some(), expected, "closure");
-        prop_assert_eq!(is_dc_backprop(&stnu), expected, "backprop");
+
+        for algorithm in ALGORITHMS {
+            prop_assert_eq!(is_dc(&stnu, algorithm), expected, "{:?}", algorithm);
+        }
     }
 
-    /// On networks too large for the oracle, closure and backpropagation still agree, and the
-    /// closure's network dispatches without violations.
+    /// On networks too large for the oracle, every checker still agrees with the closure, and
+    /// the closure's network dispatches without violations.
     #[test]
     fn checkers_agree_on_larger_networks(spec in medium_stnu(), seed in 1u64..) {
         let stnu = spec.build();
         let net = estnu(&stnu);
-        prop_assert_eq!(net.is_some(), is_dc_backprop(&stnu));
+
+        for algorithm in ALGORITHMS {
+            prop_assert_eq!(net.is_some(), is_dc(&stnu, algorithm), "{:?}", algorithm);
+        }
 
         if let Some(net) = net {
             simulate_all(&spec, &net, seed);
@@ -256,8 +339,58 @@ proptest! {
         prop_assert!(limited == Err(Error::BudgetExhausted)
             || limited == stnu.dispatchable(&TEST_BUDGET));
 
-        let limited = stnu.check_controllability(&budget);
-        prop_assert!(limited == Err(Error::BudgetExhausted)
-            || limited == stnu.check_controllability(&TEST_BUDGET));
+        for algorithm in ALGORITHMS {
+            let limited = stnu.check_controllability_with(algorithm, &budget);
+            prop_assert!(limited == Err(Error::BudgetExhausted)
+                || limited == stnu.check_controllability_with(algorithm, &TEST_BUDGET));
+        }
+    }
+
+    /// A small network's explanation closes, and its requirement bounds alone (with all links
+    /// and the oracle's horizon) are already not DC for the game.
+    #[test]
+    fn explanation_is_certificate_for_oracle(spec in small_stnu()) {
+        if let Some(cycle) = explanation(&spec.build()) {
+            assert_cycle_closes(&spec.build(), &cycle);
+            prop_assert!(!oracle::is_dc(&restrict_spec(&spec, &cycle), Reaction::Instant));
+        }
+    }
+
+    /// On larger networks, the cited requirement bounds alone are not DC for the closure.
+    #[test]
+    fn explanation_is_certificate(spec in medium_stnu()) {
+        let stnu = spec.build();
+
+        if let Some(cycle) = explanation(&stnu) {
+            assert_cycle_closes(&stnu, &cycle);
+            prop_assert!(estnu(&restrict(&stnu, &cycle)).is_none());
+        }
+    }
+}
+
+/// `spec` with only the requirement bounds that `cycle` names, in the oracle's format.
+///
+/// The horizon constraints come back with [`StnuSpec::build`]; they only make the
+/// network harder to control, so the check stays sound, just slightly weaker.
+fn restrict_spec(spec: &StnuSpec, cycle: &SemiReducibleCycle) -> StnuSpec {
+    let all: Vec<_> = spec.all_constraints().collect();
+    let constraints = cycle
+        .edges()
+        .iter()
+        .filter_map(|edge| match edge {
+            LabelledEdge::Requirement(e) => {
+                let (u, v, lo, hi) = all[e.constraint.0];
+                Some(match e.bound {
+                    Bound::Upper => (u, v, None, hi),
+                    Bound::Lower => (u, v, lo, None),
+                })
+            }
+            _ => None,
+        })
+        .collect();
+
+    StnuSpec {
+        constraints,
+        ..spec.clone()
     }
 }

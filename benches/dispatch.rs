@@ -3,7 +3,9 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use temporal_control::{Budget, DispatchableNetwork, Dispatcher, Stnu, Ticks, TimePoint};
+use temporal_control::{
+    Budget, DcAlgorithm, DispatchableNetwork, Dispatcher, Stnu, Ticks, TimePoint,
+};
 
 /// A chain of `links` activities with uncertain durations `[2, 6]`, each started at most 3 ticks
 /// after the previous one ended, under an overall deadline that leaves room for every outcome.
@@ -29,7 +31,7 @@ fn chain(links: usize) -> Stnu {
 fn network(links: usize) -> DispatchableNetwork {
     match chain(links).dispatchable(&Budget::UNLIMITED).unwrap() {
         temporal_control::Controllability::Controllable(net) => net,
-        temporal_control::Controllability::Uncontrollable => panic!("chain is DC"),
+        temporal_control::Controllability::Uncontrollable(_) => panic!("chain is DC"),
     }
 }
 
@@ -78,13 +80,19 @@ fn benches(c: &mut Criterion) {
     c.bench_function("closure_chain_10", |b| {
         b.iter(|| black_box(&stnu).dispatchable(&Budget::UNLIMITED).unwrap());
     });
-    c.bench_function("backprop_chain_10", |b| {
-        b.iter(|| {
-            black_box(&stnu)
-                .check_controllability(&Budget::UNLIMITED)
-                .unwrap()
+
+    for (name, algorithm) in [
+        ("morris2014_chain_10", DcAlgorithm::Morris2014),
+        ("per_label_backprop_chain_10", DcAlgorithm::PerLabelBackprop),
+    ] {
+        c.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(&stnu)
+                    .check_controllability_with(algorithm, &Budget::UNLIMITED)
+                    .unwrap()
+            });
         });
-    });
+    }
 }
 
 criterion_group!(group, benches);
