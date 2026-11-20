@@ -4,7 +4,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use temporal_control::{
-    Budget, DcAlgorithm, DispatchableNetwork, Dispatcher, Stnu, Ticks, TimePoint,
+    Budget, DcAlgorithm, DispatchAlgorithm, DispatchableNetwork, Dispatcher, Stnu, Ticks, TimePoint,
 };
 
 /// A chain of `links` activities with uncertain durations `[2, 6]`, each started at most 3 ticks
@@ -77,9 +77,20 @@ fn benches(c: &mut Criterion) {
     });
 
     let stnu = chain(10);
-    c.bench_function("closure_chain_10", |b| {
-        b.iter(|| black_box(&stnu).dispatchable(&Budget::UNLIMITED).unwrap());
-    });
+
+    for (name, algorithm) in [
+        ("estnu_minimal_chain_10", DispatchAlgorithm::Minimal),
+        ("estnu_morris2014_chain_10", DispatchAlgorithm::Morris2014),
+        ("closure_chain_10", DispatchAlgorithm::Closure),
+    ] {
+        c.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(&stnu)
+                    .dispatchable_with(algorithm, &Budget::UNLIMITED)
+                    .unwrap()
+            });
+        });
+    }
 
     for (name, algorithm) in [
         ("morris2014_chain_10", DcAlgorithm::Morris2014),
