@@ -372,6 +372,34 @@ impl<'a> Encoded<'a> {
         Ok(encoded)
     }
 
+    /// [`Self::parse`] after the magic and version checks, without the checksum: the Kani
+    /// harnesses use it to reach the structural checks without a CRC over symbolic bytes, which
+    /// is what made them too large for CBMC. The checksum is checked by its own harness.
+    ///
+    /// # Errors
+    ///
+    /// [`DecodeError::LengthMismatch`], [`DecodeError::Truncated`] or
+    /// [`DecodeError::NonCanonical`].
+    #[cfg(kani)]
+    pub(crate) fn parse_without_checksum(bytes: &'a [u8]) -> Result<Self, DecodeError> {
+        let encoded = Self::framed(bytes)?;
+        encoded.verify_canonical()?;
+        Ok(encoded)
+    }
+
+    /// An encoding of `points` point and `edges` edge records that is taken as already
+    /// framed and canonical, for the Kani harnesses of the loader (the canonical-form check
+    /// over symbolic records has its own harness).
+    #[cfg(kani)]
+    pub(crate) fn assume_valid_framing(bytes: &'a [u8], points: usize, edges: usize) -> Self {
+        Self {
+            bytes,
+            points,
+            edges,
+            waits: 0,
+        }
+    }
+
     /// Reads the counts and checks that they match the buffer length exactly.
     ///
     /// # Errors

@@ -383,31 +383,60 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
 | Simulated dispatch | DC networks (and dispatchable STNs) under ASAP, latest and random agents and min, max and random nature: no dispatcher error, every requirement and contingent bound holds | done; resets and overruns: milestone 4 |
 | Encoding | Round trips of dispatchable STNs and ESTNUs (decode equals the original, re-encoding is byte-identical, simulated dispatch from decoded `usize` and `u16` dispatchers matches the original run); every single-bit flip and every truncation of a sample encoding is rejected and leaves a busy dispatcher unchanged; each `DecodeError`; random bytes and random records behind a valid header and CRC never panic | done |
 | Fuzzing | Standalone `fuzz/` crate (not a workspace member): `decode` (raw bytes and framed random records; onboard and ground decoders agree), `dispatch` (arbitrary networks and call sequences, `usize` and `u16` dispatchers agree, rejected loads change nothing), `dc_checkers` (STNUs up to 8 points: all checkers and the closure agree, DC networks load and round-trip). Run with `cargo +nightly fuzz run <target> -- -max_total_time=60`; 60 s each found nothing | done; construction-only target and CI runs open |
-| Model checking | Kani harnesses for the dispatcher calls and the decoder on small fixed capacities: no panic, no overflow, windows respected | written, run on concrete inputs in unit tests; never run under Kani (not installed) |
+| Model checking | Kani harnesses for the dispatcher calls and the decoder on small fixed capacities: no panic, no overflow, windows respected | done: 11 harnesses verified under Kani 0.68, each under 12 GB (bounds and results below); also run on concrete inputs in unit tests |
 | Simulation | deterministic replay with injected contingent durations and resets: DC network plus dispatcher never violates a requirement constraint | milestone 4 |
 
 **Kani harnesses.** `src/dispatch/proofs.rs` holds bounded no-panic checks as ordinary
-functions: a dispatcher with capacity 3 points and 7 entries loads an arbitrary (possibly
-malformed) network of up to 3 points, 3 edges and one wait, then runs 3 arbitrary calls
-(`observe`, `execute`, `can_execute`, `step`, `check_deadlines`), asserting that a point only
-executes inside its window and is then recorded; and the decoder gets arbitrary bytes of up
-to 61 bytes, or one arbitrary point record and one edge record behind a valid header and
-CRC. Unit tests run these checks on 20,000 pseudo-random concrete inputs each. The
-`#[cfg(kani)]` harnesses (`proofs::harnesses`, for `u16` and `usize` indices) run them on
-fully symbolic inputs; normal builds ignore them (`unexpected_cfgs` knows `cfg(kani)`).
-Kani is not installed in the development environment, so the harnesses have only been
-type-checked against a stub, never run. To run them:
+functions; unit tests run them on 20,000 pseudo-random concrete inputs each (with up to three
+calls per scenario). The `#[cfg(kani)]` harnesses in `proofs::harnesses` run them on symbolic
+inputs; normal builds ignore them (`unexpected_cfgs` knows `cfg(kani)`).
+
+- **Dispatcher**, one harness per call kind: a `Dispatcher<2, 3>` loads an arbitrary (possibly
+  malformed) network of up to 2 points, 1 edge and one wait, then makes one call of that kind
+  at an arbitrary point and time. The `execute` harness asserts that a point only executes
+  inside its window and is then recorded. `u16` indices for every kind, `usize` for
+  `execute`. Unwind 4.
+- **Decoder**, split by stage: arbitrary inputs shorter than 24 bytes (framing only); a
+  24-byte input with zero counts and arbitrary magic, version, reserved field and checksum
+  (framing, CRC, canonical form); one arbitrary point record behind a valid header (length
+  and canonical form, checksum skipped); loading one canonical point record, and one point
+  plus one arbitrary edge record, into a `Dispatcher<1, 2>` (structural validation and the
+  in-place fill, framing assumed). Two `#[cfg(kani)]` helpers on `Encoded` skip the checksum
+  or the framing for these; production code never calls them.
+
+Every harness was run alone under a 12 GB cap with Kani 0.68 (CBMC 6.11), unwinding
+assertions on. All verify:
+
+| Harness | Result | Time | Peak memory |
+| --- | --- | --- | --- |
+| `decoder_short_input` | SUCCESSFUL | 9 s | 0.4 GB |
+| `decoder_framing_and_checksum` | SUCCESSFUL | 8 s | 0.4 GB |
+| `decoder_canonical_point_record` | SUCCESSFUL | 4 s | 0.4 GB |
+| `decoder_load_point_record` | SUCCESSFUL | 5 s | 0.4 GB |
+| `decoder_load_point_and_edge_records` | SUCCESSFUL | 10 s | 0.4 GB |
+| `dispatcher_can_execute_u16` | SUCCESSFUL | 2 min 22 s | 4.2 GB |
+| `dispatcher_check_deadlines_u16` | SUCCESSFUL | 2 min 10 s | 4.0 GB |
+| `dispatcher_observe_u16` | SUCCESSFUL | 2 min 44 s | 4.2 GB |
+| `dispatcher_execute_u16` | SUCCESSFUL | 3 min 2 s | 4.4 GB |
+| `dispatcher_execute_usize` | SUCCESSFUL | 2 min 19 s | 5.8 GB |
+| `dispatcher_step_u16` | SUCCESSFUL | 3 min 23 s | 8.8 GB |
+
+What did not fit, and was cut: the earlier bounds (3 points, 3 edges, 3 calls; 61-byte
+decoder inputs; unwind 9 and 66) drove CBMC to 51 GB. Two edges with one call reached 11.9
+GB; two calls in one harness, a whole decode-and-load of a symbolic 24-byte input, and any
+loader harness at unwind 22 (needed for the 21-byte record checks) hit the 12 GB cap. Call
+sequences are therefore covered only by the unit tests and the `dispatch` fuzz target, and the
+loader only with the framing checks split off. No harness found a counterexample.
+
+Run one harness at a time, always with a memory cap:
 
 ```sh
-cargo install --locked kani-verifier && cargo kani setup
-cargo kani --lib                                       # all harnesses
-cargo kani --lib --harness dispatcher_never_panics_u16 # one harness
+systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0 \
+  timeout 1800 cargo kani --lib --harness dispatcher_step_u16 --output-format=terse
 ```
 
-The unwind bound (9 for the dispatcher, 66 for the decoder) covers the longest loop (the
-CRC over 57 bytes); if Kani reports an unwinding assertion failure, raise it. The CRC over
-symbolic bytes may make the framed decoder harness slow; it is separate from the raw-bytes
-harness so that either can be run alone.
+Do not run `cargo kani --lib` without `--harness` and without a cap: it verifies every
+harness in one process.
 
 ## 9. Milestones
 
@@ -423,8 +452,8 @@ harness so that either can be run alone.
    dispatchable ESTNU (Morris 2014 dispatchable + `minDispESTNU` without diamonds),
    `no_std`/no-`alloc` dispatcher with fixed capacity and input validation, incremental STN
    consistency, in-place loading from a `const EMPTY`, `u16`/`u32` index types, compact
-   checksummed encoding with a no-`alloc` decoder, fuzz targets, Kani harnesses (done; the
-   harnesses have not been run under Kani yet). Open: provably minimal ESTNU for this
+   checksummed encoding with a no-`alloc` decoder, fuzz targets, Kani harnesses (done, all
+   verified at small bounds). Open: provably minimal ESTNU for this
    dispatcher (or an `RTE*` dispatcher), running Kani in CI.
 4. **Simulation**: deterministic simulator with injected durations, resets and overruns.
 5. **Adapters**: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
