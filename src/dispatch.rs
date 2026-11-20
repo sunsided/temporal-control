@@ -48,6 +48,8 @@ pub mod encoding;
 mod index;
 #[cfg(feature = "alloc")]
 mod network;
+#[cfg(any(test, kani))]
+mod proofs;
 mod source;
 
 use core::fmt;
