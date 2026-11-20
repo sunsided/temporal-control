@@ -13,7 +13,7 @@ use crate::budget::Meter;
 use crate::{Budget, Error, Ticks};
 
 /// Row-major `n * n` distance matrix; `None` is `+infinity`.
-type Matrix = Vec<Option<Ticks>>;
+pub(crate) type Matrix = Vec<Option<Ticks>>;
 
 /// Runs Floyd-Warshall.
 ///
@@ -81,7 +81,7 @@ fn initial_matrix(stn: &Stn, cells: usize) -> Result<Matrix, Error> {
 /// # Errors
 ///
 /// [`Error::Overflow`] if a path length overflows.
-fn relax_through(dist: &mut Matrix, n: usize, k: usize) -> Result<(), Error> {
+pub(crate) fn relax_through(dist: &mut Matrix, n: usize, k: usize) -> Result<(), Error> {
     for i in 0..n {
         let Some(d_ik) = dist[i * n + k] else {
             continue;
@@ -105,6 +105,6 @@ fn relax_through(dist: &mut Matrix, n: usize, k: usize) -> Result<(), Error> {
 }
 
 /// Whether a matrix entry is a finite negative distance.
-fn is_negative(d: Option<Ticks>) -> bool {
+pub(crate) fn is_negative(d: Option<Ticks>) -> bool {
     d.is_some_and(|d| d < Ticks::ZERO)
 }

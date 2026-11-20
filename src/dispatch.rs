@@ -2,7 +2,7 @@
 //!
 //! A *dispatchable network* is a set of [`DispatchEdge`]s (`t_to - t_from <= weight`) and
 //! [`Wait`]s over executable and contingent time points. The ground side derives it from an
-//! [`Stn`](crate::Stn) or a dynamically controllable STNU; the onboard side only
+//! [`Stn`](crate::Stn) or a dynamically controllable [`Stnu`](crate::Stnu); the onboard side only
 //! loads and executes it.
 //!
 //! # Execution semantics

@@ -15,7 +15,7 @@
 mod bellman_ford;
 mod dispatchable;
 mod explanation;
-mod floyd_warshall;
+pub(crate) mod floyd_warshall;
 mod incremental;
 mod minimal;
 
@@ -251,6 +251,6 @@ impl Stn {
 /// # Errors
 ///
 /// [`Error::Overflow`] if the length does not fit `u64`.
-fn steps(len: usize) -> Result<u64, Error> {
+pub(crate) fn steps(len: usize) -> Result<u64, Error> {
     u64::try_from(len).map_err(|_| Error::Overflow)
 }

@@ -11,6 +11,8 @@ use core::fmt;
 pub enum Error {
     /// A time point does not belong to this network.
     UnknownTimePoint,
+    /// A contingent link needs `0 < lo <= hi`.
+    InvalidContingentLink,
     /// A checked arithmetic operation on [`Ticks`](crate::Ticks) or a size overflowed.
     Overflow,
     /// The step budget ran out before the algorithm finished.
@@ -27,6 +29,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
             Self::UnknownTimePoint => "time point does not belong to this network",
+            Self::InvalidContingentLink => "contingent link bounds must satisfy 0 < lo <= hi",
             Self::Overflow => "tick arithmetic overflowed",
             Self::BudgetExhausted => "step budget exhausted",
             Self::MemoryBudgetExceeded => "memory budget exceeded",

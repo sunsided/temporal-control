@@ -6,8 +6,8 @@ use super::{DispatchEdge, DispatchError, Dispatcher, PointKind, Wait};
 
 /// A dispatchable network produced on the ground, ready to load into a [`Dispatcher`].
 ///
-/// Produced by [`Stn::dispatchable`](crate::Stn::dispatchable). Point indices match the source
-/// network.
+/// Produced by [`Stn::dispatchable`](crate::Stn::dispatchable) and
+/// [`Stnu::dispatchable`](crate::Stnu::dispatchable). Point indices match the source network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchableNetwork {
     /// Kind of every time point, indexed by [`TimePoint`](crate::TimePoint).

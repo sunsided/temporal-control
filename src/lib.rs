@@ -49,6 +49,8 @@ pub mod dispatch;
 mod error;
 #[cfg(feature = "alloc")]
 pub mod stn;
+#[cfg(feature = "alloc")]
+pub mod stnu;
 mod ticks;
 mod time_point;
 
@@ -62,5 +64,7 @@ pub use stn::{
     Bound, Constraint, ConstraintId, CycleEdge, IncrementalStn, MinimalNetwork, NegativeCycle,
     Schedule, Stn, Verdict,
 };
+#[cfg(feature = "alloc")]
+pub use stnu::{ContingentId, ContingentLink, Controllability, Stnu};
 pub use ticks::Ticks;
 pub use time_point::TimePoint;
