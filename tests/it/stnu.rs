@@ -2,7 +2,7 @@
 
 use proptest::prelude::*;
 use temporal_control::{
-    Bound, Budget, ContingentId, Controllability, DcAlgorithm, DispatchAlgorithm,
+    Bound, Budget, ContingentId, Controllability, CycleStep, DcAlgorithm, DispatchAlgorithm,
     DispatchableNetwork, Error, LabelledEdge, SemiReducibleCycle, Stnu, Ticks, TimePoint,
 };
 
@@ -71,10 +71,11 @@ fn explanation(stnu: &Stnu) -> Option<SemiReducibleCycle> {
 fn assert_cycle_closes(stnu: &Stnu, cycle: &SemiReducibleCycle) {
     let edges: Vec<_> = cycle
         .edges()
-        .iter()
         .map(|e| e.resolve(stnu).expect("edge belongs to the network"))
         .collect();
     assert_ne!(edges.len(), 0, "empty cycle");
+    assert_eq!(cycle.expanded_len(), Some(edges.len()));
+    assert_derived_edges_hold(stnu, cycle);
 
     for (i, &(_, head, _)) in edges.iter().enumerate() {
         let (tail, _, _) = edges[(i + 1) % edges.len()];
@@ -84,6 +85,37 @@ fn assert_cycle_closes(stnu: &Stnu, cycle: &SemiReducibleCycle) {
     let weight: i64 = edges.iter().map(|e| e.2.0).sum();
     assert_eq!(Ticks(weight), cycle.weight());
     assert!(weight < 0, "{cycle:?}");
+}
+
+/// Asserts that every derived edge of `cycle` refers only to earlier ones and that its path
+/// chains from its tail to its head with its stated weight.
+fn assert_derived_edges_hold(stnu: &Stnu, cycle: &SemiReducibleCycle) {
+    let ends = |step: &CycleStep| match *step {
+        CycleStep::Edge(e) => e.resolve(stnu).unwrap(),
+        CycleStep::Derived(i) => {
+            let d = &cycle.derived()[i];
+            (d.from, d.to, d.weight)
+        }
+    };
+
+    for (i, d) in cycle.derived().iter().enumerate() {
+        assert_ne!(d.steps.len(), 0, "empty derived edge {i}");
+        let mut at = d.from;
+        let mut weight = 0;
+
+        for step in &d.steps {
+            if let CycleStep::Derived(j) = step {
+                assert!(*j < i, "derived edge {i} refers to later {j}");
+            }
+
+            let (tail, head, w) = ends(step);
+            assert_eq!(tail, at, "derived edge {i} does not chain");
+            at = head;
+            weight += w.0;
+        }
+
+        assert_eq!((at, Ticks(weight)), (d.to, d.weight), "derived edge {i}");
+    }
 }
 
 /// `stnu` with all time points and contingent links, but only the requirement bounds that
@@ -139,7 +171,7 @@ fn must_precede_unknown_end_is_not_dc() {
     assert!(
         cycle
             .edges()
-            .contains(&LabelledEdge::UpperCase(ContingentId(0)))
+            .any(|e| e == LabelledEdge::UpperCase(ContingentId(0)))
     );
 }
 
@@ -478,6 +510,13 @@ proptest! {
         if let Some(cycle) = explanation(&stnu) {
             assert_cycle_closes(&stnu, &cycle);
             prop_assert!(estnu(&restrict(&stnu, &cycle)).is_none());
+
+            // Compact: at most one entry per derived edge, each a path of at most n' steps.
+            let nodes = stnu.time_point_count() + stnu.links().len();
+            let compact = cycle.steps().len()
+                + cycle.derived().iter().map(|d| d.steps.len()).sum::<usize>();
+            prop_assert!(cycle.derived().len() <= nodes * nodes);
+            prop_assert!(compact <= nodes * (nodes * nodes + 1));
         }
     }
 }
@@ -490,7 +529,6 @@ fn restrict_spec(spec: &StnuSpec, cycle: &SemiReducibleCycle) -> StnuSpec {
     let all: Vec<_> = spec.all_constraints().collect();
     let constraints = cycle
         .edges()
-        .iter()
         .filter_map(|edge| match edge {
             LabelledEdge::Requirement(e) => {
                 let (u, v, lo, hi) = all[e.constraint.0];

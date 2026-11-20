@@ -158,7 +158,7 @@ continues. The dispatcher never panics on any input; all tick arithmetic is chec
 | STNU DC check, RUL⁻ | Cairo, Hunsberger and Rizzi 2018, with contingent activation points normalised to executable ones | `O(n m + k (m + k n) log n)` with a binary heap (paper: `O(mn + k^2 n + k n log n)`) | done |
 | STNU DC check, RUL2021 | Hunsberger and Posenato AAAI 2022, Algorithms 1-7: one recursive pass per upper-case edge, resumed after interruptions, only length-preserving edges inserted, CC loops checked by forward propagation | as RUL⁻ | done |
 | STNU DC check, cross-check | per-label backpropagation: Morris-style, one propagation per kind of negative in-edge, no normalisation | `O(n (k + 1) (m + n^2) log n)` | done |
-| Non-DC explanation | semi-reducible negative cycle collected while Morris's nested propagations unwind, derived edges expanded to original ones | metered; worst case exponential in `k` (magic loops, `3 * 2^k - 2` edges) | done |
+| Non-DC explanation | semi-reducible negative cycle collected while Morris's nested propagations unwind, in compact form (each derived edge once, lazily expandable) | `O(n^3)` compact; expansion up to `3 * 2^k - 2` edges | done |
 | Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | done |
 
 Two independent algorithms per question are a deliberate choice: they cross-check each other
@@ -246,12 +246,19 @@ STNU (done): a non-DC verdict carries a semi-reducible negative cycle.
 
 ```text
 SemiReducibleCycle {
-    edges: [Requirement(CycleEdge) | LowerCase(ContingentId) | UpperCase(ContingentId), ...],
-    weight: Ticks,                                  // < 0, lower-case at lo, upper-case at -hi
+    steps:   [Edge(LabelledEdge) | Derived(index), ...],   // top level, traversal order
+    derived: [DerivedEdge { from, to, weight, steps: [...] }, ...],  // each once, inner first
+    weight:  Ticks,                                  // < 0, lower-case at lo, upper-case at -hi
 }
+LabelledEdge = Requirement(CycleEdge) | LowerCase(ContingentId) | UpperCase(ContingentId)
 ```
 
-The edges chain like an STN cycle (`LabelledEdge::resolve` gives tail, head and weight). An
+The compact form lists each derived edge (an ordinary edge the checker inferred, with the path
+it summarises) once, so it has `O(n^3)` steps; `edges()` expands it lazily into original
+edges, which can be exponentially many in `k` (Hunsberger's magic loops need `3 * 2^k - 2`).
+For operators, a derived edge reads as an intermediate conclusion ("X must follow Y by at most
+w, because ..."). The expanded edges chain like an STN cycle (`LabelledEdge::resolve` gives
+tail, head and weight). An
 upper-case edge reads "if this link takes its full duration", a lower-case edge "if it ends as
 early as possible"; `SemiReducibleCycle::contingent_links` lists the links involved. The cycle
 is not necessarily simple or minimal. Checked property: keeping only its requirement bounds
@@ -318,10 +325,9 @@ structurally is still open.
   Hunsberger and Posenato (2023, section 2.1.1) and CSTNU-Tool's `applyMorris2014`,
   `applyNormalForm` and `morris2014DCBackpropagation` (read, not copied); compare with the
   paper before citing it publicly.
-- Explanations: a semi-reducible cycle can need exponentially many edges in `k` (magic
-  loops), so building one is metered and may exhaust a budget the verdict fits. Default:
-  expand fully under the budget. Alternative: return the nested form (derived edges as
-  references to sub-paths), or use the SRN-cycle finder of Hunsberger and Posenato (TIME 2024).
+- Explanations: the compact form avoids the exponential expansion. The TIME 2024 SRN-cycle
+  finder (Hunsberger and Posenato) would give shorter cycles; not implemented. Whether
+  operators want the nested form or a minimal expanded cycle is open.
 - Whether the onboard network must be smaller still to fit fixed capacities; the default is
   reduced, but its worst case is still `n^2` edges plus `n k` waits.
 - Dispatcher policy: `step` executes as soon as possible. Whether flight use needs other

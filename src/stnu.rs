@@ -37,7 +37,7 @@ mod min_disp;
 mod morris;
 mod rul;
 
-pub use explanation::{LabelledEdge, SemiReducibleCycle};
+pub use explanation::{CycleStep, DerivedEdge, LabelledEdge, SemiReducibleCycle};
 
 use alloc::vec::Vec;
 
@@ -89,7 +89,7 @@ pub enum DcAlgorithm {
     /// edges are non-negative and at most one per (node, source) pair, so all incoming lists
     /// together hold `O(m + n'^2)` edges, each scanned at its final length because a node's
     /// own propagation (the only one adding edges into it) finishes before anyone extends
-    /// through it. Explaining a negative verdict is extra and not polynomially bounded (see
+    /// through it. Explaining a negative verdict adds `O(n^3)` for the compact cycle (see
     /// [`SemiReducibleCycle`]).
     #[default]
     Morris2014,
@@ -264,7 +264,7 @@ impl Stnu {
     /// // X -> C: 2 (requirement), C -> A: -10 (C may take 10), A -> C: 1 (C may take 1),
     /// // C -> X: -1 (requirement): the agent would have to know C before it happens.
     /// assert!(cycle.weight() < Ticks::ZERO);
-    /// assert!(cycle.contingent_links().count() >= 1);
+    /// assert!(!cycle.contingent_links().is_empty());
     /// ```
     ///
     /// # Errors

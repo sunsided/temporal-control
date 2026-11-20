@@ -70,23 +70,29 @@
 //! # Explanation
 //!
 //! The cycle consists of one negative path per nested call, from the node that interrupted it
-//! to its source. It is collected while the calls unwind. Derived edges are then expanded,
-//! through the stored shortest-path tree of the propagation that created them, into the
-//! normal-form edges, and these are mapped back: `A'_i` is `A_i`, the two tie edges are dropped,
-//! and the labelled edges get their original weights `l_i` and `-u_i`. The total is unchanged,
-//! because a cycle enters `A'_i` by the tie (`+l_i`) or the upper-case edge (`l_i - u_i`) and
-//! leaves it by the tie (`-l_i`) or the lower-case edge (`0`); each of the four combinations
-//! weighs the same before and after the mapping. The expansion is metered by the step budget.
-//! Its length is not polynomially bounded: an indivisible semi-reducible negative cycle may
-//! need `3 * 2^k - 2` edges (the *magic loops* of Hunsberger, ICAART 2013), repeating edges.
+//! to its source. It is collected while the calls unwind, then put into compact form: every
+//! derived edge on it becomes a [`DerivedEdge`] listed once, whose steps come from the stored
+//! shortest-path tree of the propagation that created it, recursively. Normal-form edges are
+//! mapped back: `A'_i` is `A_i`, the two tie edges are dropped, and the labelled edges get
+//! their original weights `l_i` and `-u_i`. A cycle's total is unchanged, because a cycle
+//! enters `A'_i` by the tie (`+l_i`) or the upper-case edge (`l_i - u_i`) and leaves it by the
+//! tie (`-l_i`) or the lower-case edge (`0`); each of the four combinations weighs the same
+//! before and after the mapping. A derived edge's weight is the sum over its mapped path.
+//!
+//! There are at most `n'^2` derived edges, each a path of at most `n'` steps, so building the
+//! compact form costs `O(n'^3)` steps; expanding it ([`SemiReducibleCycle::edges`]) can yield
+//! `3 * 2^k - 2` edges (Hunsberger's magic loops).
 
+use alloc::collections::BTreeMap;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::{ContingentId, Controllability, LabelledEdge, SemiReducibleCycle, Stnu};
+use super::{
+    ContingentId, Controllability, CycleStep, DerivedEdge, LabelledEdge, SemiReducibleCycle, Stnu,
+};
 use crate::budget::Meter;
 use crate::stn::{Bound, ConstraintId, CycleEdge, steps};
-use crate::{Budget, Error, Ticks};
+use crate::{Budget, Error, Ticks, TimePoint};
 
 /// Where an edge of the normal-form graph comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,7 +395,7 @@ impl<'m> Graph<'m> {
         }
     }
 
-    /// Expands a complete trace into original edges and checks that it is negative.
+    /// Turns a complete trace into a compact cycle and checks that it is negative.
     ///
     /// # Errors
     ///
@@ -400,34 +406,97 @@ impl<'m> Graph<'m> {
             return Err(Error::Internal);
         }
 
-        let mut pending: Vec<EdgeRef> = trace.edges.iter().rev().copied().collect();
-        let mut edges = Vec::new();
-        let mut weight = Ticks::ZERO;
+        let mut compact = Compact {
+            stnu,
+            ids: BTreeMap::new(),
+            derived: Vec::new(),
+        };
+        let (steps, weight) = compact.steps(self, &trace.edges)?;
 
-        while let Some((head, i)) = pending.pop() {
-            self.meter.spend(1)?;
-            let e = self.incoming[head][i];
-
-            match e.origin {
-                Origin::Original(edge) => {
-                    weight = weight
-                        .checked_add(edge.resolve(stnu)?.2)
-                        .ok_or(Error::Overflow)?;
-                    edges.push(edge);
-                }
-                Origin::Tie => {}
-                Origin::Derived => {
-                    let path = walk(&self.trees[head], e.from, head)?;
-                    pending.extend(path.into_iter().rev());
-                }
-            }
-        }
-
-        if edges.is_empty() || weight >= Ticks::ZERO {
+        if steps.is_empty() || weight >= Ticks::ZERO {
             return Err(Error::Internal);
         }
 
-        Ok(SemiReducibleCycle::new(edges, weight))
+        Ok(SemiReducibleCycle::new(steps, compact.derived, weight))
+    }
+}
+
+/// Builder of the compact form of a cycle: each derived edge is listed once.
+struct Compact<'s> {
+    /// The network, for original weights and activation points.
+    stnu: &'s Stnu,
+    /// Index in `derived` of each derived edge already listed.
+    ids: BTreeMap<EdgeRef, usize>,
+    /// Derived edges, inner ones first.
+    derived: Vec<DerivedEdge>,
+}
+
+impl Compact<'_> {
+    /// The compact steps of a path of normal-form edges and their total original weight.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BudgetExhausted`], [`Error::Overflow`] or [`Error::Internal`].
+    fn steps(
+        &mut self,
+        g: &mut Graph<'_>,
+        path: &[EdgeRef],
+    ) -> Result<(Vec<CycleStep>, Ticks), Error> {
+        let mut steps = Vec::new();
+        let mut weight = Ticks::ZERO;
+
+        for &(head, i) in path {
+            g.meter.spend(1)?;
+            let e = g.incoming[head][i];
+            let (step, w) = match e.origin {
+                Origin::Original(edge) => (CycleStep::Edge(edge), edge.resolve(self.stnu)?.2),
+                Origin::Tie => continue,
+                Origin::Derived => {
+                    let id = self.derived_id(g, (head, i))?;
+                    (CycleStep::Derived(id), self.derived[id].weight)
+                }
+            };
+
+            weight = weight.checked_add(w).ok_or(Error::Overflow)?;
+            steps.push(step);
+        }
+
+        Ok((steps, weight))
+    }
+
+    /// The index of the derived edge `edge`, listing it (and its inner edges) first if new.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BudgetExhausted`], [`Error::Overflow`] or [`Error::Internal`].
+    fn derived_id(&mut self, g: &mut Graph<'_>, edge: EdgeRef) -> Result<usize, Error> {
+        if let Some(&id) = self.ids.get(&edge) {
+            return Ok(id);
+        }
+
+        let (head, i) = edge;
+        let from = g.incoming[head][i].from;
+        let path = walk(&g.trees[head], from, head)?;
+        let (steps, weight) = self.steps(g, &path)?;
+        let id = self.derived.len();
+        self.derived.push(DerivedEdge {
+            from: self.point(from),
+            to: self.point(head),
+            weight,
+            steps,
+        });
+        self.ids.insert(edge, id);
+        Ok(id)
+    }
+
+    /// The time point a normal-form node stands for: a link's own activation node is its
+    /// activation point.
+    fn point(&self, node: usize) -> TimePoint {
+        let n = self.stnu.time_point_count();
+        match node.checked_sub(n) {
+            Some(i) => self.stnu.links[i].activation,
+            None => TimePoint(node),
+        }
     }
 }
 
