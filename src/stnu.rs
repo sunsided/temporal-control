@@ -77,8 +77,7 @@ pub enum Controllability<T> {
 /// stnu.add_constraint(warm, analysis, Some(Ticks(0)), Some(Ticks(2))).expect("exists");
 ///
 /// let verdict = stnu.dispatchable(&Budget::UNLIMITED).expect("within budget");
-/// assert!(matches!(verdict, Controllable(_)));
-/// # use Controllability::Controllable;
+/// assert!(matches!(verdict, Controllability::Controllable(_)));
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct Stnu {
