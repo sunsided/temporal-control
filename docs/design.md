@@ -88,13 +88,23 @@ This reverses the intent previously written here (decide only on observations st
   they match the same-tick game on random small STNUs. Example: `A => C [1, 10]` with
   `t_X = t_C` is DC under same-tick reaction and not DC under next-tick reaction.
 - A first attempt at a next-tick variant (making the lower- and cross-case conditions
-  non-strict) did not match the next-tick game on contingent chains and was dropped.
+  non-strict) did not match the next-tick game on contingent chains and was dropped. Missing
+  piece, in hindsight: label removal would also have needed the `ε` shift.
 
 Consequence for integrators: the executive must hand observations of tick `t` to the dispatcher
 before asking it what to execute at `t` (`Dispatcher::step` does this). If the platform can only
 react one tick later, the guarantees do not hold. Next-tick DC implies same-tick DC (also
-tested), so a next-tick checker would be the conservative choice; it is an open question
-(section 11).
+tested).
+
+**Next-tick reaction (done, `Stnu::with_reaction(Reaction::NextTick)`).** Instead of new rules,
+a transformation: replace every contingent point `C` by its observation `C' = C + 1`. A link
+from an executable point becomes `[lo + 1, hi + 1]`, a link from a contingent point keeps its
+bounds (both ends move), and requirements are rewritten with `C = C' - 1`. A same-tick agent
+of the new network sees exactly what a next-tick agent of the old one sees, so every checker
+and dispatchable-network algorithm applies unchanged; the tests check all checkers against the
+next-tick game, including contingent chains, and simulate the resulting networks. Executing it
+needs an executive that hands each observation to the dispatcher one tick late, as the shifted
+point.
 
 ### 3.3 Dispatchable networks and execution
 
@@ -273,7 +283,7 @@ structurally is still open.
 | Example tests | Hand-written networks with known answers (rover example) | done |
 | Property tests (proptest) | BF and FW agree; schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
 | Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | milestone 2 |
-| Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; closure, Morris 2014, RUL⁻ and per-label backprop must match the same-tick game; next-tick DC implies same-tick DC; mutations (run by hand, recorded in the commit messages) must make it fail: closure rules and unsuitability; Morris unsuitability, recursion, lower-case edges, derived edges, stop at non-negative distance, normalisation; RUL⁻ non-length-preserving Upper⁻, blocker check, Lower⁻, the `u - l` bound, seeding with the own lower-case edge, normalisation | done |
+| Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; every checker and dispatchable-network algorithm must match the same-tick game, and on the next-tick transformation the next-tick game; next-tick DC implies same-tick DC; mutations (run by hand, recorded in the commit messages) must make it fail: closure rules and unsuitability; Morris unsuitability, recursion, lower-case edges, derived edges, stop at non-negative distance, normalisation; RUL⁻ non-length-preserving Upper⁻, blocker check, Lower⁻, the `u - l` bound, seeding with the own lower-case edge, normalisation | done |
 | Differential (internal) | Incremental STN vs from-scratch Floyd-Warshall after every constraint; every STNU checker vs the closure on STNUs up to 7 executable points and 4 links; STNU without links vs STN; filtered STN vs its minimal network | done |
 | Explanations | Every SRN cycle chains, closes with its stated negative weight, and its requirement bounds alone are not DC (oracle on small, closure on medium networks) | done |
 | Simulated dispatch | DC networks (and dispatchable STNs) under ASAP, latest and random agents and min, max and random nature: no dispatcher error, every requirement and contingent bound holds | done; resets and overruns: milestone 4 |
@@ -313,10 +323,10 @@ structurally is still open.
 
 ## 11. Open questions
 
-- Reaction time (see 3.2). Default chosen: same-tick reaction. Needs confirmation that the
-  target executive can deliver an observation and act on it within one tick; otherwise a
-  next-tick checker is needed. Also confirm which variant the CSTNU-Tool STNU checker uses
-  before differential testing.
+- Reaction time (see 3.2). Default chosen: same-tick reaction; next-tick is available by
+  transformation. Needs confirmation which one the target executive delivers. Also confirm
+  which variant the CSTNU-Tool STNU checker uses before differential testing. Reaction delays
+  of more than one tick would generalise the transformation (`C' = C + ε`); not exposed.
 - Minimal ESTNU: the default network is bounded and reduced, but its dispatchability rests on
   Morris's theorem for the unreduced network plus simulation for the reduction. Either prove
   the reduction for this dispatcher, or implement `RTE*` (propagation along waits) onboard and

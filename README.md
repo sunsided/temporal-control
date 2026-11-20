@@ -24,6 +24,7 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | Differential tests against CSTNU-Tool, fuzzing, Kani harnesses | planned |
 
 Reaction-time semantics: an observation at tick `t` may trigger executions at the same tick.
+Next-tick reaction is supported by transforming the network (`Stnu::with_reaction`).
 Every algorithm takes an explicit compute and memory budget.
 
 ## License

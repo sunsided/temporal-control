@@ -35,9 +35,11 @@ mod estnu;
 mod explanation;
 mod min_disp;
 mod morris;
+mod reaction;
 mod rul;
 
 pub use explanation::{CycleStep, DerivedEdge, LabelledEdge, SemiReducibleCycle};
+pub use reaction::Reaction;
 
 use alloc::vec::Vec;
 

@@ -456,6 +456,35 @@ proptest! {
         }
     }
 
+    /// Next-tick reaction by transformation: every checker on the transformed network matches
+    /// the game with the next-tick move order, and its dispatchable network (fed observations
+    /// one tick late, i.e. as the shifted points) satisfies every requirement.
+    #[test]
+    fn next_tick_matches_oracle(spec in small_stnu(), seed in 1u64..) {
+        let expected = oracle::is_dc(&spec, Reaction::NextTick);
+        let shifted = spec
+            .build()
+            .with_reaction(temporal_control::Reaction::NextTick)
+            .expect("small bounds");
+
+        for algorithm in ALGORITHMS {
+            prop_assert_eq!(is_dc(&shifted, algorithm), expected, "{:?}", algorithm);
+        }
+
+        let net = estnu(&shifted);
+        prop_assert_eq!(net.is_some(), expected);
+
+        if let Some(net) = net {
+            let mut rng = Rng(seed);
+
+            for agent in [Agent::Asap, Agent::Latest, Agent::Random] {
+                for nature in [Nature::Min, Nature::Max, Nature::Random] {
+                    assert_satisfies(&shifted, &sim::run(&net, agent, nature, &mut rng));
+                }
+            }
+        }
+    }
+
     /// Next-tick reaction is stricter: whatever it can control, same-tick reaction can too.
     #[test]
     fn next_tick_is_stricter(spec in small_stnu()) {
