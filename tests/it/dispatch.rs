@@ -1,5 +1,7 @@
 //! Dispatchable STNs: equivalence of the filtered network and simulated dispatch.
 
+use std::sync::Mutex;
+
 use proptest::prelude::*;
 use temporal_control::{
     Budget, DispatchEdge, DispatchError, DispatchableNetwork, Dispatcher, PointKind, Stn, Ticks,
@@ -443,4 +445,37 @@ proptest! {
             prop_assert_eq!(&sim::run_on(&mut mid, &net, agent, Nature::Random, &mut Rng(seed)), &expected);
         }
     }
+}
+
+/// A dispatcher of about 1 MB capacity in a `static`, initialised at compile time.
+static BIG: Mutex<Dispatcher<8192, 8192>> = Mutex::new(Dispatcher::EMPTY);
+
+/// `load`, a rejected `load` and `load_encoded` work in place: on a 256 KiB stack, any
+/// temporary of the dispatcher's size would overflow it.
+#[test]
+fn loading_needs_no_capacity_sized_stack() {
+    let points = [PointKind::Executable; 2];
+    let edges = two_point_edges();
+
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(move || {
+            let mut d = BIG.lock().unwrap();
+            d.load(&points, &edges, &[]).unwrap();
+            assert_eq!(
+                d.load(&vec![PointKind::Executable; 8193], &[], &[]),
+                Err(DispatchError::CapacityExceeded)
+            );
+
+            let mut buf = [0u8; 128];
+            let len =
+                temporal_control::dispatch::encoding::encode_into(&points, &edges, &[], &mut buf)
+                    .unwrap();
+            d.load_encoded(&buf[..len]).unwrap();
+            d.execute(TimePoint(0), Ticks(0)).unwrap();
+            assert_eq!(d.next_wakeup(), Some(Ticks(5)));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }

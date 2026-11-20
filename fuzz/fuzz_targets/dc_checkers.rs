@@ -30,6 +30,17 @@ const ALGORITHMS: [DcAlgorithm; 3] = [
     DcAlgorithm::PerLabelBackprop,
 ];
 
+/// Position of `algorithm` in [`ALGORITHMS`]; the exhaustive `match` makes a new
+/// [`DcAlgorithm`] variant a compile error here until it is added to the list.
+#[expect(dead_code, reason = "compile-time completeness guard only")]
+const fn position(algorithm: DcAlgorithm) -> usize {
+    match algorithm {
+        DcAlgorithm::Morris2014 => 0,
+        DcAlgorithm::RulMinus => 1,
+        DcAlgorithm::PerLabelBackprop => 2,
+    }
+}
+
 /// One construction step; indices are reduced modulo the current point count.
 #[derive(Debug, Clone, Copy, Arbitrary)]
 enum Op {

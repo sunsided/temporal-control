@@ -329,8 +329,9 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
 - One canonical encoding per network: the reserved field and executable payloads must be
   zero, unknown tags are rejected. Decoding then re-encoding gives the same bytes (tested).
 - CRC-32/ISO-HDLC (zlib's), table built at compile time, no dependency. It detects every
-  burst of up to 32 bits, so every single-bit error and every truncation (also caught by the
-  length check) is rejected; it is an integrity check, not authentication. If uplink
+  burst of up to 32 bits, so every single-bit error is rejected; truncation and trailing bytes
+  are rejected by the exact-length check before the CRC is computed. It is an integrity
+  check, not authentication. If uplink
   authenticity matters, a MAC belongs in the transport layer.
 - Decoding checks, each with its own `DecodeError`: minimum length, magic, version (before
   the checksum, so a later version may move it), exact length from the counts (computed in

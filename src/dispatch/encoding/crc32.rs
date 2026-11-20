@@ -35,8 +35,8 @@ const fn table() -> [u32; 256] {
 ///
 /// Parameters: polynomial `0x04C11DB7` (reflected `0xEDB88320`), initial value and final XOR
 /// `0xFFFFFFFF`, input and output reflected. Check value: `crc32(b"123456789") ==
-/// 0xCBF4_3926`. Detects every error burst of up to 32 bits, so in particular every single-
-/// and double-bit error in the messages this crate encodes.
+/// 0xCBF4_3926`. Detects every error burst of up to 32 bits, in particular every single-bit
+/// error.
 ///
 /// # Examples
 ///
