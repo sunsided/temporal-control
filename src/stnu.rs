@@ -97,6 +97,10 @@ pub enum DcAlgorithm {
     /// potential function, at most `2k` rounds, `O(n m + k (m + k n) log n)`. Fastest on
     /// sparse networks with few links.
     RulMinus,
+    /// RUL2021 (Hunsberger and Posenato, AAAI 2022): RUL⁻ processing each upper-case edge once,
+    /// recursively, inserting only length-preserving edges and checking non-negative loops by
+    /// a forward propagation instead. Same bound as RUL⁻, much less work in practice.
+    Rul2021,
     /// Morris-style backpropagation without the normal form: one propagation per kind of
     /// negative incoming edge, `O(n (k + 1) (m + n^2) log n)`. Kept as an independent
     /// cross-check.
@@ -310,6 +314,7 @@ impl Stnu {
         match algorithm {
             DcAlgorithm::Morris2014 => morris::run(self, budget),
             DcAlgorithm::RulMinus => rul::run(self, budget),
+            DcAlgorithm::Rul2021 => rul::run_2021(self, budget),
             DcAlgorithm::PerLabelBackprop => backprop::run(self, budget),
         }
     }

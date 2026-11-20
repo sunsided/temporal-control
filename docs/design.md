@@ -155,7 +155,8 @@ continues. The dispatcher never panics on any input; all tick arithmetic is chec
 | Extended dispatchable STNU (default) | Morris 2014 dispatchable variant, then `minDispESTNU` without diamond stand-ins | `O(n m + k n^3)` | done |
 | Extended dispatchable STNU, reference | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
 | STNU DC check (default) | Morris 2014 backpropagation from negative nodes, one linear-scan Dijkstra per node on Morris's normal form (each link gets its own activation node and lower bound 0), as in CSTNU-Tool's `applyNormalForm` | `O(n m + n^3)`, i.e. `O(n^3)` for `m = O(n^2)`; proof in `stnu/morris.rs` | done |
-| STNU DC check, RUL⁻ | Cairo, Hunsberger and Rizzi 2018, with contingent activation points normalised to executable ones | `O(n m + k (m + k n) log n)` with a binary heap (paper: `O(mn + k^2 n + k n log n)`) | done; the AAAI 2022 speed-up (RUL2021) is open |
+| STNU DC check, RUL⁻ | Cairo, Hunsberger and Rizzi 2018, with contingent activation points normalised to executable ones | `O(n m + k (m + k n) log n)` with a binary heap (paper: `O(mn + k^2 n + k n log n)`) | done |
+| STNU DC check, RUL2021 | Hunsberger and Posenato AAAI 2022, Algorithms 1-7: one recursive pass per upper-case edge, resumed after interruptions, only length-preserving edges inserted, CC loops checked by forward propagation | as RUL⁻ | done |
 | STNU DC check, cross-check | per-label backpropagation: Morris-style, one propagation per kind of negative in-edge, no normalisation | `O(n (k + 1) (m + n^2) log n)` | done |
 | Non-DC explanation | semi-reducible negative cycle collected while Morris's nested propagations unwind, derived edges expanded to original ones | metered; worst case exponential in `k` (magic loops, `3 * 2^k - 2` edges) | done |
 | Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | done |
@@ -278,7 +279,7 @@ structurally is still open.
 1. **STN** (done on `draft/initial`): construction, BF consistency with witness or negative
    cycle, FW minimal network, budgets, property tests, `thumbv7em-none-eabihf` build.
 2. **STNU and DC**: contingent links, labelled-closure checker, Morris 2014 `O(n^3)` checker,
-   RUL⁻, per-label backprop, SRN-cycle explanations, brute-force oracle (done). Open: RUL2021,
+   RUL⁻, RUL2021, per-label backprop, SRN-cycle explanations, brute-force oracle (done). Open:
    CSTNU-Tool differential harness, fuzz targets.
 3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN, bounded and reduced
    dispatchable ESTNU (Morris 2014 dispatchable + `minDispESTNU` without diamonds),

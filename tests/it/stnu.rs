@@ -40,9 +40,10 @@ const DISPATCHERS: [DispatchAlgorithm; 3] = [
 ];
 
 /// Every checker behind [`Stnu::check_controllability_with`].
-const ALGORITHMS: [DcAlgorithm; 3] = [
+const ALGORITHMS: [DcAlgorithm; 4] = [
     DcAlgorithm::Morris2014,
     DcAlgorithm::RulMinus,
+    DcAlgorithm::Rul2021,
     DcAlgorithm::PerLabelBackprop,
 ];
 

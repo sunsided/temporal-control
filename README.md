@@ -16,6 +16,7 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | STNU dynamic controllability: labelled closure with extended dispatchable network (reference) | done |
 | STNU dynamic controllability: Morris 2014 `O(n^3)` backpropagation (default checker) | done |
 | STNU dynamic controllability: RUL⁻ (Cairo, Hunsberger and Rizzi 2018) | done |
+| STNU dynamic controllability: RUL2021 (Hunsberger and Posenato 2022) | done |
 | STNU dynamic controllability: per-label backpropagation (cross-check) | done |
 | Explanations of non-controllability (semi-reducible negative cycles) | done |
 | Onboard dispatcher, `no_std` without `alloc`, fixed capacity | done |

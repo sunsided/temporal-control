@@ -61,6 +61,8 @@ use crate::budget::Meter;
 use crate::stn::steps;
 use crate::{Budget, Error, Ticks, TimePoint};
 
+mod rul2021;
+
 /// The LO-graph, the potential and the edges into contingent points during one check.
 struct Rul<'m> {
     /// The contingent links, with activation points normalised to be executable.
@@ -90,6 +92,23 @@ pub(super) fn run(stnu: &Stnu, budget: &Budget) -> Result<Controllability<()>, E
     let mut g = Rul::new(stnu, budget, &mut meter)?;
 
     if g.init_potential()? && g.process_links()? {
+        return Ok(Controllability::Controllable(()));
+    }
+
+    super::morris::explain(stnu, budget).map(Controllability::Uncontrollable)
+}
+
+/// Checks dynamic controllability with RUL2021 ([`rul2021`]); a negative verdict is explained
+/// by Morris 2014.
+///
+/// # Errors
+///
+/// See [`Stnu::check_controllability_with`].
+pub(super) fn run_2021(stnu: &Stnu, budget: &Budget) -> Result<Controllability<()>, Error> {
+    let mut meter = budget.meter();
+    let mut g = Rul::new(stnu, budget, &mut meter)?;
+
+    if g.init_potential()? && rul2021::run(&mut g)? {
         return Ok(Controllability::Controllable(()));
     }
 
