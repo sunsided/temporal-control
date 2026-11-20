@@ -7,7 +7,7 @@ use temporal_control::{
 
 use crate::oracle::{self, Reaction};
 use crate::sim::{self, Agent, Nature, Rng};
-use crate::stnu_gen::{StnuSpec, small_stnu};
+use crate::stnu_gen::{StnuSpec, medium_stnu, small_stnu};
 
 /// Budget for checks on generated networks: generous, but a hang fails the test instead.
 const TEST_BUDGET: Budget = Budget {
@@ -24,6 +24,15 @@ fn estnu(stnu: &Stnu) -> Option<DispatchableNetwork> {
         Controllability::Controllable(net) => Some(net),
         Controllability::Uncontrollable => None,
     }
+}
+
+/// Verdict of [`Stnu::check_controllability`]. Panics on budget exhaustion.
+fn is_dc_backprop(stnu: &Stnu) -> bool {
+    let verdict = stnu.check_controllability(&TEST_BUDGET);
+    matches!(
+        verdict.expect("backprop fits the test budget"),
+        Controllability::Controllable(())
+    )
 }
 
 /// Contingent `A => C` in `[1, 10]` and executable `X` with `C - X` in `[lo, hi]` plus an
@@ -152,15 +161,12 @@ fn assert_satisfies(stnu: &Stnu, times: &[Ticks]) {
     }
 }
 
-/// The generator yields both verdicts, and DC networks with waits, often enough.
-#[test]
-fn generator_covers_verdicts_and_waits() {
+/// Counts `(DC, DC with waits)` among `samples` networks drawn from `strategy`.
+fn coverage(strategy: &impl Strategy<Value = StnuSpec>, samples: usize) -> (usize, usize) {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
 
     let mut runner = TestRunner::deterministic();
-    let strategy = small_stnu();
-    let samples = 400;
     let (mut dc, mut with_waits) = (0, 0);
 
     for _ in 0..samples {
@@ -172,14 +178,21 @@ fn generator_covers_verdicts_and_waits() {
         }
     }
 
-    assert!(
-        dc > samples / 5 && dc < samples * 4 / 5,
-        "{dc} of {samples} DC"
-    );
-    assert!(
-        with_waits > samples / 20,
-        "only {with_waits} DC networks with waits"
-    );
+    (dc, with_waits)
+}
+
+/// Both generators yield both verdicts, and DC networks with waits, often enough.
+#[test]
+fn generators_cover_verdicts_and_waits() {
+    let samples = 400;
+
+    for (name, (dc, waits)) in [
+        ("small", coverage(&small_stnu(), samples)),
+        ("medium", coverage(&medium_stnu(), samples)),
+    ] {
+        assert!(dc > samples / 5 && dc < samples * 4 / 5, "{name}: {dc} DC");
+        assert!(waits > samples / 20, "{name}: {waits} with waits");
+    }
 }
 
 /// Runs the dispatcher on `spec` under every policy pair.
@@ -196,11 +209,26 @@ fn simulate_all(spec: &StnuSpec, net: &DispatchableNetwork, seed: u64) {
 }
 
 proptest! {
-    /// The closure agrees with the brute-force game under same-tick reaction.
+    /// Closure and backpropagation agree with the brute-force game under same-tick reaction.
     #[test]
-    fn closure_matches_oracle(spec in small_stnu()) {
+    fn checkers_match_oracle(spec in small_stnu()) {
         let expected = oracle::is_dc(&spec, Reaction::Instant);
-        prop_assert_eq!(estnu(&spec.build()).is_some(), expected);
+        let stnu = spec.build();
+        prop_assert_eq!(estnu(&stnu).is_some(), expected, "closure");
+        prop_assert_eq!(is_dc_backprop(&stnu), expected, "backprop");
+    }
+
+    /// On networks too large for the oracle, closure and backpropagation still agree, and the
+    /// closure's network dispatches without violations.
+    #[test]
+    fn checkers_agree_on_larger_networks(spec in medium_stnu(), seed in 1u64..) {
+        let stnu = spec.build();
+        let net = estnu(&stnu);
+        prop_assert_eq!(net.is_some(), is_dc_backprop(&stnu));
+
+        if let Some(net) = net {
+            simulate_all(&spec, &net, seed);
+        }
     }
 
     /// Next-tick reaction is stricter: whatever it can control, same-tick reaction can too.

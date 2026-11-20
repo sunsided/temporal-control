@@ -70,12 +70,27 @@ impl StnuSpec {
     }
 }
 
-/// Small random STNUs: up to 3 executable points and 2 contingent links.
+/// Small random STNUs: up to 3 executable points and 2 contingent links, for the oracle.
+pub fn small_stnu() -> impl Strategy<Value = StnuSpec> {
+    stnu_up_to(3, 2, 5)
+}
+
+/// Larger random STNUs, too big for the oracle: up to 7 executable points and 4 links.
+pub fn medium_stnu() -> impl Strategy<Value = StnuSpec> {
+    stnu_up_to(7, 4, 6)
+}
+
+/// Random STNUs with at most `max_exec` executable points, `max_links` contingent links and
+/// `max_constraints` requirements besides the horizon.
 ///
 /// Half of the requirements bound a contingent point from above relative to an executable one,
 /// because those create waits; uniform pairs rarely exercise the upper-case rule.
-pub fn small_stnu() -> impl Strategy<Value = StnuSpec> {
-    (1usize..=3, 0usize..=2).prop_flat_map(|(n_exec, k)| {
+fn stnu_up_to(
+    max_exec: usize,
+    max_links: usize,
+    max_constraints: usize,
+) -> impl Strategy<Value = StnuSpec> {
+    (1usize..=max_exec, 0usize..=max_links).prop_flat_map(move |(n_exec, k)| {
         let n = n_exec + k;
         let links = (0..k)
             .map(|i| (0..n_exec + i, 1i64..=2, 1i64..=6))
@@ -107,7 +122,7 @@ pub fn small_stnu() -> impl Strategy<Value = StnuSpec> {
                 .boxed()
         };
         let constraint = prop_oneof![any, waiting];
-        let constraints = proptest::collection::vec(constraint, 1..6);
+        let constraints = proptest::collection::vec(constraint, 1..=max_constraints);
         (links, constraints, 3i64..=7).prop_map(move |(links, constraints, horizon)| StnuSpec {
             n_exec,
             links,

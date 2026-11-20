@@ -19,9 +19,11 @@
 //! ```mermaid
 //! graph LR
 //!     stnu["Stnu"] -->|"dispatchable (labelled closure)"| v["Controllable(DispatchableNetwork) or Uncontrollable"]
+//!     stnu -->|"check_controllability (Morris 2014 backprop)"| c["Controllable or Uncontrollable"]
 //!     v --> d["Dispatcher (onboard)"]
 //! ```
 
+mod backprop;
 mod closure;
 
 use alloc::vec::Vec;
@@ -164,6 +166,20 @@ impl Stnu {
     #[must_use]
     pub fn time_point_count(&self) -> usize {
         self.requirements.time_point_count()
+    }
+
+    /// Checks dynamic controllability with Morris's backpropagation from negative nodes.
+    ///
+    /// Independent of [`Stnu::dispatchable`]; both must agree, which the tests check. Use this
+    /// when only the verdict is needed: it keeps `O(n + m)` memory plus derived edges instead
+    /// of dense matrices. See the `backprop` module docs for the cost.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BudgetExhausted`] if the step budget runs out.
+    /// - [`Error::Overflow`] if a path weight overflows `i64`.
+    pub fn check_controllability(&self, budget: &Budget) -> Result<Controllability<()>, Error> {
+        backprop::run(self, budget)
     }
 
     /// Checks dynamic controllability and derives a dispatchable extended STNU.
