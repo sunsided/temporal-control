@@ -88,6 +88,34 @@ fn dmp_table_1_minimal_network() {
     }
 }
 
+/// P³C (Planken, de Weerdt and van der Krogt 2008, whose Fig. 4 shows the same minimal
+/// network) reproduces Table 1 too once every pair is of interest.
+#[test]
+fn dmp_table_1_by_p3c() {
+    let mut stn = dmp_example();
+
+    for i in 0..5 {
+        for j in i + 1..5 {
+            stn.add_constraint(TimePoint(i), TimePoint(j), None, None)
+                .unwrap();
+        }
+    }
+
+    let Verdict::Consistent(net) = stn.partial_path_consistency(&Budget::UNLIMITED).unwrap() else {
+        panic!("the example is consistent");
+    };
+
+    for (i, row) in DMP_TABLE_1.iter().enumerate() {
+        for (j, &d) in row.iter().enumerate() {
+            assert_eq!(
+                net.upper(TimePoint(i), TimePoint(j)),
+                Some(Ticks(d)),
+                "d[{i}][{j}]"
+            );
+        }
+    }
+}
+
 /// Dechter, Meiri and Pearl (1991, after Table 2): John by bus (`x2 - x1 >= 60`) and Fred in
 /// the carpool (`x4 - x3` in `[40, 50]`) is inconsistent.
 #[test]

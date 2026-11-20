@@ -2,7 +2,8 @@
 
 use proptest::prelude::*;
 use temporal_control::{
-    Bound, Budget, Error, MinimalNetwork, NegativeCycle, Schedule, Stn, Ticks, TimePoint, Verdict,
+    Bound, Budget, ChordalNetwork, Error, MinimalNetwork, NegativeCycle, Schedule, Stn, Ticks,
+    TimePoint, Verdict,
 };
 
 use crate::generators::{StnSpec, any_stn, extreme_stn};
@@ -125,6 +126,28 @@ fn generator_covers_both_verdicts() {
     );
 }
 
+/// Asserts that every pair of `net` has the bounds of the minimal network `min`.
+fn assert_matches_minimal(net: &ChordalNetwork, min: &MinimalNetwork) {
+    for (a, b) in net.pairs() {
+        assert!(net.contains(a, b) && net.contains(b, a));
+        assert_eq!(net.upper(a, b), min.upper(a, b), "{a:?} -> {b:?}");
+        assert_eq!(net.upper(b, a), min.upper(b, a), "{b:?} -> {a:?}");
+    }
+}
+
+/// `spec` with an unbounded constraint between every pair, so P³C computes all of them.
+fn with_all_pairs(spec: &StnSpec) -> StnSpec {
+    let mut out = spec.clone();
+
+    for i in 0..spec.n {
+        for j in i + 1..spec.n {
+            out.constraints.push((i, j, None, None));
+        }
+    }
+
+    out
+}
+
 proptest! {
     /// Bellman-Ford and Floyd-Warshall agree on consistency.
     #[test]
@@ -196,6 +219,57 @@ proptest! {
 
         if let Ok(Verdict::Inconsistent(cycle)) = &bf {
             assert_valid_cycle(&stn, cycle);
+        }
+    }
+
+    /// P³C agrees with Bellman-Ford on consistency and with Floyd-Warshall on every pair it
+    /// computes; with every pair constrained it computes the whole minimal network.
+    #[test]
+    fn p3c_agrees_with_floyd_warshall(spec in any_stn()) {
+        let stn = spec.build().unwrap();
+        let bf = stn.check_consistency(&Budget::UNLIMITED).unwrap();
+        let ppc = stn.partial_path_consistency(&Budget::UNLIMITED).unwrap();
+        prop_assert_eq!(is_consistent(&bf), is_consistent(&ppc));
+
+        if let Verdict::Inconsistent(cycle) = &ppc {
+            assert_valid_cycle(&stn, cycle);
+        }
+
+        let full = with_all_pairs(&spec).build().unwrap();
+
+        if let (Verdict::Consistent(net), Verdict::Consistent(min), Verdict::Consistent(all)) = (
+            ppc,
+            stn.minimal_network(&Budget::UNLIMITED).unwrap(),
+            full.partial_path_consistency(&Budget::UNLIMITED).unwrap(),
+        ) {
+            assert_matches_minimal(&net, &min);
+            assert_matches_minimal(&all, &min);
+            let n = spec.n * spec.n.saturating_sub(1) / 2;
+            prop_assert_eq!(all.pairs().count(), n);
+        }
+    }
+
+    /// Under any budget P³C returns a budget error or the unlimited result; extreme bounds
+    /// give a verdict that agrees with Bellman-Ford, or `Overflow`.
+    #[test]
+    fn p3c_budgets_and_extremes(
+        spec in any_stn(),
+        extreme in extreme_stn(),
+        max_steps in 0u64..400,
+        max_cells in 0usize..64,
+    ) {
+        let stn = spec.build().unwrap();
+        let ppc = stn.partial_path_consistency(&Budget { max_steps, max_cells });
+        prop_assert!(matches!(ppc, Err(Error::BudgetExhausted | Error::MemoryBudgetExceeded))
+            || ppc == stn.partial_path_consistency(&Budget::UNLIMITED));
+
+        if let Ok(stn) = extreme.build() {
+            let ppc = stn.partial_path_consistency(&Budget::UNLIMITED);
+            prop_assert!(matches!(ppc, Ok(_) | Err(Error::Overflow)));
+
+            if let (Ok(ppc), Ok(bf)) = (&ppc, stn.check_consistency(&Budget::UNLIMITED)) {
+                prop_assert_eq!(is_consistent(ppc), is_consistent(&bf));
+            }
         }
     }
 }

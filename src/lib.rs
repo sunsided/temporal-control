@@ -6,7 +6,7 @@
 //! ## Scope
 //!
 //! - Simple Temporal Networks ([`Stn`]): consistency checking with a negative-cycle explanation,
-//!   minimal networks, incremental consistency ([`IncrementalStn`]) and filtered dispatchable
+//!   minimal networks (all pairs, or the constrained pairs only with P³C), incremental consistency ([`IncrementalStn`]) and filtered dispatchable
 //!   networks ([`Stn::dispatchable`]).
 //! - STNs with Uncertainty ([`Stnu`]): dynamic controllability by independent checkers
 //!   ([`Stnu::dispatchable`], which also yields an extended dispatchable network with waits;
@@ -75,8 +75,8 @@ pub use dispatch::{
 pub use error::Error;
 #[cfg(feature = "alloc")]
 pub use stn::{
-    Bound, Constraint, ConstraintId, CycleEdge, IncrementalStn, MinimalNetwork, NegativeCycle,
-    Schedule, Stn, Verdict,
+    Bound, ChordalNetwork, Constraint, ConstraintId, CycleEdge, IncrementalStn, MinimalNetwork,
+    NegativeCycle, Schedule, Stn, Verdict,
 };
 #[cfg(feature = "alloc")]
 pub use stnu::{

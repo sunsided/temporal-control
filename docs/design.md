@@ -54,6 +54,11 @@ and every value `x` in that interval, some satisfying schedule has `σ(t_j) - σ
 (decomposability, DMP Theorem 3.3). In particular each bound is attained (*tightness*), which
 the property tests check.
 
+**Partial path consistency.** `Stn::partial_path_consistency` computes the same bounds only for
+the pairs of a chordal supergraph of the constraint graph (every constrained pair plus fill
+edges), with P³C (Planken, de Weerdt and van der Krogt 2008). A pair of interest that shares no
+constraint is added as a constraint without bounds.
+
 **Explanation of inconsistency.** A negative cycle `e_1, ..., e_k` in `G(S)`, where every edge
 is named by `(ConstraintId, Bound::{Upper, Lower})`. Summing the encoded inequalities around the
 cycle gives `0 <= Σ w(e_i) < 0`, a contradiction. So the named constraint bounds are a
@@ -198,7 +203,8 @@ loading fails with `DispatchError::IndexTypeTooSmall`. Measured per point and pe
 | --- | --- | --- | --- |
 | STN consistency + witness schedule + negative cycle | Bellman-Ford from a virtual source, predecessor walk for the cycle | `O(n m)` time, `O(n + m)` memory | done |
 | STN minimal network | Floyd-Warshall with early negative-diagonal stop | `O(n^3)` time, `n^2` cells | done |
-| STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) | `O(n m + n^2 log n)` | later, only if needed |
+| STN minimal constraints of the constrained pairs (sparse) | P³C (Planken, de Weerdt and van der Krogt 2008): minimum-degree triangulation with DPC in one pass, then the backward sweep; pairs of interest added as unbounded constraints | `O((n + m + t) log n)` for `t` triangles of the chordal graph (paper: `Θ(t)` with constant-time edge lookups), memory `O(n + m + fill)` | done |
+| STN minimal network, sparse, all pairs | Johnson (BF potentials + Dijkstra per source) | `O(n m + n^2 log n)` | later, only if needed |
 | STN incremental consistency | keep the closed matrix; reject a constraint closing a negative cycle | `O(n^2)` per constraint, `n^2` cells | done |
 | Extended dispatchable STNU (default) | Morris 2014 dispatchable variant, then `minDispESTNU` without diamond stand-ins | `O(n m + k n^3)` | done |
 | Extended dispatchable STNU, reference | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
@@ -365,7 +371,7 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
 | --- | --- | --- |
 | Example tests | Hand-written networks with known answers (rover example) | done |
 | Paper examples | The papers' own examples with their stated answers (`tests/it/papers.rs`): DMP 1991 Table 1, MMV 2001 Fig. 2, Hunsberger 2009 Figs. 1 and 2, the Morris 2014 section 4 cycle | done |
-| Property tests (proptest) | BF and FW agree; schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
+| Property tests (proptest) | BF, FW and P³C agree (P³C on every pair it computes); schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
 | Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | milestone 2 |
 | Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; every checker and dispatchable-network algorithm must match the same-tick game, and on the next-tick transformation the next-tick game; next-tick DC implies same-tick DC; mutations (run by hand, recorded in the commit messages) must make it fail: closure rules and unsuitability; Morris unsuitability, recursion, lower-case edges, derived edges, stop at non-negative distance, normalisation; RUL⁻ non-length-preserving Upper⁻, blocker check, Lower⁻, the `u - l` bound, seeding with the own lower-case edge, normalisation | done |
 | Differential (internal) | Incremental STN vs from-scratch Floyd-Warshall after every constraint; every STNU checker vs the closure on STNUs up to 7 executable points and 4 links; STNU without links vs STN; filtered STN vs its minimal network | done |
@@ -474,7 +480,8 @@ harness so that either can be run alone.
 
 ## 12. Validation against the papers
 
-Each paper below was downloaded and read in full, then compared with the code rule by rule.
+Each paper below except MMT 1998 (12.7) was downloaded and read in full, then compared with
+the code rule by rule.
 Status: *matches*, *deviation* (deliberate, with the reason), *bug fixed*, or *not
 implemented*. Examples from the papers with their stated answers are tests in
 `tests/it/papers.rs`; all pass, and none of the comparisons below found a bug in the code.
@@ -533,6 +540,7 @@ complexity statements were cross-checked against P³C's restatement of DPC.
 | Theorem 3.1: consistent iff no negative cycle; Corollary 3.2: schedules from distances of `X_0` | Bellman-Ford from a virtual source | matches; the virtual source is our adaptation |
 | Theorem 3.3 and Corollaries 3.4, 3.5: the d-graph is decomposable and the minimal network | `MinimalNetwork`; tightness property test | matches |
 | Floyd-Warshall, negative cycles seen on the diagonal | same, stopping at the first negative diagonal entry before its round | matches; the early stop is ours (keeps distances from diverging) |
+| DPC (Fig. 9) along an ordering, adding the induced edges; Theorem 5.11: DPC detects every inconsistency of an STP | the first pass of P³C (`stn/p3c.rs`) | matches; the emptiness test is applied to every pair when its first endpoint is eliminated, not only to the pair just tightened, which also covers `lo > hi` and conflicting parallel constraints that the theorem's non-empty input intervals exclude |
 | Example 1.1, Table 1 | `dmp_table_1_minimal_network`, `dmp_bus_and_carpool_is_inconsistent` | matches |
 
 ### 12.5 Bhargava, Vaquero and Williams, IJCAI 2017 (`stnu/morris.rs`, `stnu/explanation.rs`)
@@ -547,7 +555,24 @@ complexity statements were cross-checked against P³C's restatement of DPC.
 | A conflict is the cycle plus, per lower-case edge, the constraint that its extension becomes non-negative | the cycle only | not implemented (open question, section 11) |
 | `RELAXIDC`, incremental re-checks | none | not implemented (out of scope) |
 
-### 12.6 Muscettola, Morris and Tsamardinos, KR 1998
+### 12.6 Planken, de Weerdt and van der Krogt, ICAPS 2008 (`stn/p3c.rs`)
+
+| Paper | Code | Status |
+| --- | --- | --- |
+| Input: a chordal graph with a simplicial elimination ordering, obtained by triangulation (minimum-fill or minimum-degree heuristic, Kjærulff) | minimum-degree elimination, lowest index on ties; the fill edges and the order come out of the same pass | matches |
+| Algorithm 3, lines 1-2: DPC along the order (no edges added, since the order is simplicial) | DPC during the elimination itself, which adds the fill edges; on the filled graph the order is simplicial, so the result is the same | matches |
+| DPC's consistency test (Algorithm 1, line 4) | every pair checked when its first endpoint is eliminated; negative self-loops rejected up front | deviation (stronger, see 12.4) |
+| Algorithm 3, lines 3-8: in reverse order, for neighbours `i, j` later in the order, `w(i,k) = min(w(i,k), w(i,j) + w(j,k))`, `w(k,j) = min(w(k,j), w(k,i) + w(i,j))` | `backward_sweep` with the neighbour sets recorded at elimination | matches |
+| Theorem 3: every chordal edge gets its minimal constraint | property test against Floyd-Warshall on every computed pair, and on all pairs once every pair is constrained | matches |
+| Theorem 4: `Θ(t)` | `O((n + m + t) log n)` with ordered maps and an ordered elimination queue | deviation: no hash or matrix adjacency, to stay `no_std` + `alloc` without `n^2` cells |
+| Adding edges of interest before triangulation | constraints without bounds add the pair, not a distance-graph edge | matches |
+| Pathological class `P_t` (Definition 2): every minimal weight is zero | `pathological_instances_have_zero_minimal_weights` for `t <= 8` | matches |
+| Inconsistent input | the verdict's negative cycle comes from Bellman-Ford; if P³C overflows first, Bellman-Ford decides | addition (the paper only reports INCONSISTENT) |
+
+Mutations run by hand, each failing a test: dropping the backward sweep, the fill edges, or
+the pair check.
+
+### 12.7 Muscettola, Morris and Tsamardinos, KR 1998
 
 Not available (no verified free copy; dblp `conf/kr/MuscettolaMT98`). The different AAAI 1998
 paper by Tsamardinos, Muscettola and Morris ("Fast transformation of temporal plans for
@@ -566,7 +591,7 @@ restatement in Morris 2014, section 5:
 Read in full and compared with the code (section 12):
 
 - R. Dechter, I. Meiri and J. Pearl. Temporal constraint networks. Artificial Intelligence 49
-  (1991) 61-95.
+  (1991) 61-95 (a scanned copy, read after OCR).
 - P. Morris, N. Muscettola and T. Vidal. Dynamic control of plans with temporal uncertainty.
   IJCAI 2001, 494-499.
 - L. Hunsberger. Fixing the semantics for dynamic controllability and providing a more
@@ -598,7 +623,7 @@ Cited with bibliographic data from the reference lists of the papers above, cont
 read:
 
 - N. Muscettola, P. Morris and I. Tsamardinos. Reformulating temporal plans for efficient
-  execution. KR 1998 (not available; see 12.6).
+  execution. KR 1998 (not available; see 12.7).
 - P. Morris. A structural characterization of temporal dynamic controllability. CP 2006,
   LNCS 4204, 375-389 (semi-reducible negative cycles; restated in Morris 2014).
 - P. Morris and N. Muscettola. Temporal dynamic controllability revisited. AAAI 2005,

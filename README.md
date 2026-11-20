@@ -10,8 +10,9 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | --- | --- |
 | STN consistency (Bellman-Ford) with negative-cycle explanation | done |
 | STN minimal network (Floyd-Warshall) | done |
+| STN minimal constraints of the constrained pairs only (P³C, Planken, de Weerdt and van der Krogt 2008) | done |
 | Incremental STN consistency, `O(n^2)` per constraint | done |
-| Dispatchable STN by dominated-edge filtering (minimal except for edge copies on simultaneous points) | done |
+| Dispatchable STN by dominated-edge filtering (Muscettola, Morris and Tsamardinos 1998, as restated by Morris 2014; minimal except for edge copies on simultaneous points, if that restatement is complete) | done |
 | Extended dispatchable STNU: Morris 2014 dispatchable variant, reduced by `minDispESTNU` (without diamonds) | done |
 | STNU dynamic controllability: labelled closure with extended dispatchable network (reference) | done |
 | STNU dynamic controllability: Morris 2014 `O(n^3)` backpropagation (default checker) | done |
@@ -24,6 +25,7 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | Compact checksummed encoding (CRC-32) of dispatchable networks, no-`alloc` decoder | done |
 | `cargo fuzz` targets: decoder, dispatcher calls, DC checker agreement | done |
 | Kani harnesses for the dispatcher and the decoder | written, not yet run under Kani |
+| Algorithms compared with their papers; the papers' examples as tests (design section 12) | done |
 | Differential tests against CSTNU-Tool | planned |
 
 Reaction-time semantics: an observation at tick `t` may trigger executions at the same tick.

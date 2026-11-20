@@ -9,6 +9,7 @@
 //! graph LR
 //!     stn["Stn"] -->|"check_consistency (Bellman-Ford)"| v1["Verdict: Schedule or NegativeCycle"]
 //!     stn -->|"minimal_network (Floyd-Warshall)"| v2["Verdict: MinimalNetwork or NegativeCycle"]
+//!     stn -->|"partial_path_consistency (P3C)"| v4["Verdict: ChordalNetwork or NegativeCycle"]
 //!     inc["IncrementalStn"] -->|"add_constraint, O(n^2)"| v3["Verdict: ConstraintId or NegativeCycle"]
 //! ```
 
@@ -18,6 +19,7 @@ mod explanation;
 pub(crate) mod floyd_warshall;
 mod incremental;
 mod minimal;
+mod p3c;
 
 use alloc::vec::Vec;
 
@@ -28,6 +30,7 @@ use crate::{Budget, Error, Ticks};
 pub use explanation::{Bound, CycleEdge, NegativeCycle};
 pub use incremental::IncrementalStn;
 pub use minimal::MinimalNetwork;
+pub use p3c::ChordalNetwork;
 
 /// Handle of a constraint inside one [`Stn`], in insertion order starting at zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -216,6 +219,65 @@ impl Stn {
 
         match bellman_ford::run(self, &mut meter)? {
             Verdict::Inconsistent(cycle) => Ok(Verdict::Inconsistent(cycle)),
+            Verdict::Consistent(_) => Err(Error::Internal),
+        }
+    }
+
+    /// Computes the minimal constraints of every constrained pair with P³C (Planken, de Weerdt
+    /// and van der Krogt, ICAPS 2008), without the full `n^2` minimal network.
+    ///
+    /// The result covers a chordal supergraph of the constraint graph: every pair that shares a
+    /// constraint, plus the fill edges of a minimum-degree triangulation. For each of those
+    /// pairs the bounds equal [`Stn::minimal_network`]'s. To include a pair that shares no
+    /// constraint, add one without bounds. Runs in `O((n + m + t) log n)` steps for `m`
+    /// constraints and `t` triangles of the chordal graph (`O(n w*^2)` for induced width `w*`,
+    /// at most `O(n^3)`); see the `p3c` module docs. On inconsistency the explanation comes
+    /// from Bellman-Ford using the remaining budget, which also decides the verdict if P³C
+    /// overflows first.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::MemoryBudgetExceeded`] if the chordal graph has more than
+    ///   [`Budget::max_cells`] directed edges (two per pair).
+    /// - [`Error::BudgetExhausted`] if the step budget runs out.
+    /// - [`Error::Overflow`] if a path length, or the negation of a bound, overflows `i64` on a
+    ///   consistent network.
+    /// - [`Error::Internal`] if Bellman-Ford finds consistent a network P³C rejected (a bug).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use temporal_control::{Budget, Stn, Ticks, TimePoint, Verdict};
+    ///
+    /// // A chain a -> b -> c of 2..5 ticks each; the pair (a, c) is of interest.
+    /// let mut stn = Stn::new();
+    /// let [a, b, c] = [(); 3].map(|()| stn.add_time_point().expect("fits"));
+    /// stn.add_constraint(a, b, Some(Ticks(2)), Some(Ticks(5))).expect("exists");
+    /// stn.add_constraint(b, c, Some(Ticks(2)), Some(Ticks(5))).expect("exists");
+    /// stn.add_constraint(a, c, None, None).expect("exists");
+    ///
+    /// let Verdict::Consistent(net) = stn.partial_path_consistency(&Budget::UNLIMITED).expect("fits")
+    /// else {
+    ///     panic!("consistent");
+    /// };
+    /// assert_eq!((net.lower(a, c), net.upper(a, c)), (Some(Ticks(4)), Some(Ticks(10))));
+    /// assert!(!net.contains(TimePoint(0), TimePoint(7)));
+    /// ```
+    pub fn partial_path_consistency(
+        &self,
+        budget: &Budget,
+    ) -> Result<Verdict<ChordalNetwork>, Error> {
+        let mut meter = budget.meter();
+        let overflowed = match p3c::run(self, budget, &mut meter) {
+            Ok(Some(net)) => return Ok(Verdict::Consistent(net)),
+            Ok(None) => false,
+            Err(Error::Overflow) => true,
+            Err(e) => return Err(e),
+        };
+
+        match bellman_ford::run(self, &mut meter)? {
+            Verdict::Inconsistent(cycle) => Ok(Verdict::Inconsistent(cycle)),
+            Verdict::Consistent(_) if overflowed => Err(Error::Overflow),
             Verdict::Consistent(_) => Err(Error::Internal),
         }
     }
