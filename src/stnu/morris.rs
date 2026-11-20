@@ -4,31 +4,40 @@
 //!
 //! The labelled distance graph has one ordinary edge per requirement bound, and per contingent
 //! link `(A, l, u, C)` the lower-case edge `A -> C: c:l` and the upper-case edge `C -> A: C:-u`.
-//! The link's ordinary edges `A -> C: u` and `C -> A: -l` are not part of it, as in the graph
-//! of Cairo, Hunsberger and Rizzi (2018, section 2.2) and Hunsberger and Posenato (2023,
-//! section 2), and as in CSTNU-Tool's `Morris2014` ("Morris considers only the labeled value
-//! for contingent links").
+//! The link's ordinary edges `A -> C: u` and `C -> A: -l`, which Morris (CPAIOR 2014, section
+//! 3) also lists, are left out, as in the graph of Cairo, Hunsberger and Rizzi (2018, section
+//! 2.2) and Hunsberger and Posenato (2023, section 2), and as in CSTNU-Tool's `Morris2014`
+//! ("Morris considers only the labeled value for contingent links"). Each labelled edge is at
+//! least as tight as the ordinary edge it shadows (`l <= u`, `-u <= -l`); the brute-force
+//! oracle tests confirm that leaving the ordinary ones out changes no verdict.
 //!
-//! **Normal form.** Backpropagation from a node needs its negative incoming edges to be either
-//! all ordinary or a single upper-case edge, so that one propagation with one label is exact
-//! (see *Unsuitable edges*); Hunsberger and Posenato (Information and Computation 293, 2023,
-//! section 2.1.1) report that Morris's algorithm establishes this with an `O(n)`
-//! pre-processing step. That step is Morris's normal form, in which every contingent link has
-//! lower bound zero: each link `i` gets its own activation node `A'_i = A_i + l_i`, tied to
-//! `A_i` by the ordinary edges `A_i -> A'_i: l_i` and `A'_i -> A_i: -l_i`, and the link becomes
-//! `A'_i => C_i` in `[0, u_i - l_i]`. All other edges stay on `A_i`. This follows CSTNU-Tool's
-//! `STNU::applyNormalForm`, which `applyMorris2014` runs first; the CPAIOR 2014 paper itself
-//! was not available while writing this. Afterwards `A'_i` has exactly one negative incoming
-//! edge (the upper-case one), and every other node has only ordinary negative incoming edges,
-//! because derived edges are never negative. Under instantaneous reaction the normal form is
-//! DC iff the original is: `A'_i` executes `l_i` ticks after `A_i`, also when `A_i` is
-//! contingent.
+//! **Normal form and separated activation nodes.** Backpropagation from a node needs its
+//! negative incoming edges to be either all ordinary or a single upper-case edge, so that one
+//! propagation with one label is exact (see *Unsuitable edges*). Morris (CPAIOR 2014) gets
+//! there in two steps: the normal form (section 3: `A => C` in `[x, y]` becomes
+//! `A -> A' [x, x]` and `A' => C` in `[0, y - x]`), and a modification before Fig. 1 that
+//! gives every link an activation node of its own, apart from other links' activation and
+//! contingent points and from the targets of ordinary negative edges (an extra `[0, 0]` link).
+//! Both steps are done at once here, as in CSTNU-Tool's `STNU::applyNormalForm`: each link `i`
+//! gets its own activation node `A'_i = A_i + l_i`, tied to `A_i` by the ordinary edges
+//! `A_i -> A'_i: l_i` and `A'_i -> A_i: -l_i`, and the link becomes `A'_i => C_i` in
+//! `[0, u_i - l_i]`. All other edges stay on `A_i`. Afterwards `A'_i` has exactly one negative
+//! incoming edge (the upper-case one; the tie into it weighs `l_i > 0`), and every other node
+//! has only ordinary negative incoming edges, because derived edges are never negative. Under
+//! instantaneous reaction the result is DC iff the original is: `A'_i` executes `l_i` ticks
+//! after `A_i`, also when `A_i` is contingent. With `l_i = u_i` (which Morris excludes) the
+//! upper-case edge weighs `0` and is treated as ordinary, which is the normal-form label
+//! removal rule (`B:x` with `x >= 0` becomes `x`).
 //!
 //! # Algorithm
 //!
-//! A *negative node* has a negative incoming edge. `backprop(s)` runs Dijkstra backwards from
-//! `s`, seeded with its negative incoming edges and extending only through non-negative edges.
-//! When a node `u` is settled at distance `d`:
+//! This is `DCbackprop` of Morris (CPAIOR 2014, Fig. 1). A *negative node* has a negative
+//! incoming edge. `backprop(s)` runs Dijkstra backwards from `s`, seeded with its negative
+//! incoming edges and extending only through non-negative edges. Fig. 1 seeds every incoming
+//! edge by assignment (lines 08-11); here only the negative ones are seeded, keeping the
+//! smallest weight per tail. A non-negative seed would only re-add its own edge, and with
+//! parallel edges an assignment could replace a negative seed by a larger one. When a node
+//! `u` is settled at distance `d`:
 //!
 //! - `d >= 0`: the path `u ~> s` reduces to a new ordinary edge `u -> s` of weight `d` (by the
 //!   no-case and lower-case rules, or for an upper-case seed by the upper-case, cross-case and
@@ -64,13 +73,18 @@
 //!
 //! So each propagation costs `O(m + n'^2)` and the check `O(n' (m + n'^2)) = O(n m + n^3)`,
 //! which is Morris's `O(n^3)` whenever `m = O(n^2)`, i.e. without many parallel constraints
-//! on the same pair. Memory: the derived edges and the finished shortest-path trees kept for
+//! on the same pair. Morris's own count (section 4: at most `N` non-trivial calls of `O(N^2)`
+//! each with a Fibonacci heap, at most `O(N^2)` added edges) presumes the same: a Dijkstra
+//! call costs `O(E + N log N)`, which is `O(N^2)` only if `E = O(N^2)`. The linear scan gives
+//! the same `O(N^2)` per call without a heap. Memory: the derived edges and the finished shortest-path trees kept for
 //! explanations take `O(m + n'^2)`, the up to `n'` nested searches `O(n'^2)`.
 //!
 //! # Explanation
 //!
 //! The cycle consists of one negative path per nested call, from the node that interrupted it
-//! to its source. It is collected while the calls unwind, then put into compact form: every
+//! to its source. It is collected while the calls unwind, as in the conflict extraction of
+//! Bhargava, Vaquero and Williams (IJCAI 2017, Algorithms 1 and 2), then put into compact form
+//! instead of their full expansion of derived ("novel") edges: every
 //! derived edge on it becomes a [`DerivedEdge`] listed once, whose steps come from the stored
 //! shortest-path tree of the propagation that created it, recursively. Normal-form edges are
 //! mapped back: `A'_i` is `A_i`, the two tie edges are dropped, and the labelled edges get

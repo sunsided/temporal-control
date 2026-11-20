@@ -1,12 +1,20 @@
 //! A dispatchable extended STNU by Morris's dispatchable variant of his 2014 algorithm.
 //!
-//! Morris (2014) noted that his `O(n^3)` DC check can also insert the edges it otherwise only
-//! computes on the way, both ordinary edges and waits, and that for a DC input the result is
-//! a dispatchable extended STNU (ESTNU): every STN projection is dispatchable. This module
-//! follows CSTNU-Tool's `applyMorris2014Dispatchable` and
+//! Morris (CPAIOR 2014, end of section 4) noted that his `O(n^3)` DC check can also save the
+//! negative edges and waits it otherwise only computes on the way (`determineDC+`). Section 5
+//! proves that an extended STNU (ESTNU) whose basic projections (all links at their minimum,
+//! or all but one) are prefix/postfix complete has only dispatchable projections (Theorems 6
+//! and 7), and that a dispatchable ESTNU is DC (Theorem 4). That `determineDC+` produces such
+//! a network is argued informally there ("insight into the functioning"), for the normal-form
+//! algorithm, not proven.
+//!
+//! This module follows CSTNU-Tool's `applyMorris2014Dispatchable` and
 //! `morris2014DispatchableDCBackpropagation` (read, not copied), which, unlike the plain check
 //! in [`super::morris`], do *not* use the normal form: its rigid tie edges would stay in the
-//! output and break the dispatchability of the projections.
+//! output and break the dispatchability of the projections. The passes below, and the choice
+//! of which derived edges to save, are therefore not from the paper. The evidence that the
+//! output is dispatchable is the simulation tests (every agent and nature policy against every
+//! requirement), not a proof.
 //!
 //! # Passes
 //!

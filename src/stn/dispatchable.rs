@@ -1,7 +1,14 @@
-//! Dispatchable STNs by dominated-edge filtering (Muscettola, Morris and Tsamardinos 1998).
+//! Dispatchable STNs by dominated-edge filtering (Muscettola, Morris and Tsamardinos, KR 1998).
 //!
-//! The result is the minimal dispatchable network, except that points at offset zero from
-//! their rigid-component leader carry copies of the leader's edges (see step 1).
+//! The KR 1998 paper was not available. The filtering rules and the minimality claim are taken
+//! from its summary by Morris (CPAIOR 2014, section 5 and the proof of Theorem 5): the minimum
+//! dispatchable network keeps the all-pairs edges that are not dominated, and one edge of each
+//! group of mutually dominating edges; a negative edge `A -> B` is lower-dominated if a
+//! shortest path `A ~> C ~> B` has a negative prefix `A -> C`, a non-negative one
+//! upper-dominated if it has a non-negative suffix `C -> B`. If that summary is complete, the
+//! result is the minimum dispatchable network, except that points at offset zero from their
+//! rigid-component leader carry copies of the leader's edges (see step 1). The tests check
+//! that it is dispatchable and equivalent, not that it is minimum.
 //!
 //! The minimal network (all-pairs shortest paths) is dispatchable but dense. Filtering keeps a
 //! subset of its edges that is still dispatchable:

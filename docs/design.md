@@ -41,15 +41,18 @@ An edge `u -> v` with weight `w` encodes `t_v - t_u <= w`. Parallel edges are al
 smallest weight per ordered pair matters. Self-loops are allowed; a self-loop with negative
 weight is a one-edge negative cycle.
 
-**Theorem (DMP 1991).** `S` is consistent iff `G(S)` has no negative cycle. If it is
-consistent, `σ(t) = d(s, t)` (shortest distance from a virtual source `s` with zero-weight edges
-to all time points) satisfies `S`.
+**Theorem (DMP 1991, Theorem 3.1).** `S` is consistent iff `G(S)` has no negative cycle. If
+it is consistent, `σ(t) = d(s, t)` (shortest distance from a virtual source `s` with
+zero-weight edges to all time points) satisfies `S`. DMP's proof and Corollary 3.2 use the
+distances from a time point `X_0` instead (latest and earliest schedules); the virtual source
+is our adaptation, which needs no reference point that reaches every other.
 
 **Minimal network.** For a consistent `S`, let `D[i][j]` be the shortest-path distance
 `t_i -> t_j` in `G(S)` (`+∞` if none). The minimal network replaces each pair's interval with
-`[-D[j][i], D[i][j]]`. It is the tightest equivalent STN: for every pair and every value `x` in
-that interval, some satisfying schedule has `σ(t_j) - σ(t_i) = x`. In particular each bound is
-attained (*tightness*), which the property tests check.
+`[-D[j][i], D[i][j]]` (DMP Corollary 3.5). It is the tightest equivalent STN: for every pair
+and every value `x` in that interval, some satisfying schedule has `σ(t_j) - σ(t_i) = x`
+(decomposability, DMP Theorem 3.3). In particular each bound is attained (*tightness*), which
+the property tests check.
 
 **Explanation of inconsistency.** A negative cycle `e_1, ..., e_k` in `G(S)`, where every edge
 is named by `(ConstraintId, Bound::{Upper, Lower})`. Summing the encoded inequalities around the
@@ -60,7 +63,7 @@ found is simple (each vertex at most once) but not necessarily minimum in size o
 ### 3.2 STN with Uncertainty (STNU)
 
 An STNU adds *contingent links* `(A, l, u, C)` with `0 < l <= u < ∞` (Morris, Muscettola and
-Vidal 2001): once the activation point `A` is executed, nature sets the contingent point `C` to
+Vidal 2001, who require `0 < l < u`; Morris 2014 allows `0 <= l < u`): once the activation point `A` is executed, nature sets the contingent point `C` to
 some time in `[A + l, A + u]`. The agent only learns `C` when it happens. Contingent points
 are distinct: each is the target of exactly one contingent link (`Stnu::add_contingent_link`
 creates it), and the agent never executes it. Activation points may themselves be contingent
@@ -78,6 +81,19 @@ all requirement constraints in every situation.
 contingent events happen first, then the agent decides, so an observation at tick `t` may
 trigger an execution at the same tick `t` (*instantaneous reaction at tick granularity*).
 Formally, the agent's choice at `t` may depend on every contingent time `<= t`.
+
+Relation to the literature (section 12). MMV 2001 let a decision depend on contingent
+durations that finished strictly before the point being decided ("not on those in the future
+(or present)"). Hunsberger (TIME 2009) showed that comparing pre-histories relative to time
+points admits strategies with advance knowledge (counter-example `N!`) and fixed it by
+comparing them relative to times: a DES* decides at time `k` from the contingent events
+strictly before `k`. Morris (CPAIOR 2014) keeps Hunsberger's time-based histories but includes
+the present ("the agent can react instantaneously"), which is the variant whose rules this
+crate implements. So `SameTick` is Morris 2014's semantics on integer times, and `NextTick`
+is the discrete analogue of Hunsberger's DES*: the reaction takes one tick instead of an
+arbitrarily small time. All three papers reason over real-valued schedules; that the
+checkers decide the integer-time game exactly rests on the brute-force oracle tests, not on a
+theorem.
 
 This reverses the intent previously written here (decide only on observations strictly before
 `t`, i.e. react at `t + 1`). Reasons:
@@ -109,7 +125,9 @@ point.
 ### 3.3 Dispatchable networks and execution
 
 A network is *dispatchable* if a greedy dispatcher that only propagates to immediate neighbors
-never violates a constraint (Muscettola, Morris and Tsamardinos 1998).
+never violates a constraint (Muscettola, Morris and Tsamardinos, KR 1998). That paper was not
+available; the definition, the filtering rules and the minimality result below are as Morris
+(CPAIOR 2014, section 5) restates them.
 
 **STN.** `MinimalNetwork::dispatchable` filters the minimal network (the result is minimal
 except for the edge copies on simultaneous points described below). Rigid components
@@ -180,7 +198,7 @@ loading fails with `DispatchError::IndexTypeTooSmall`. Measured per point and pe
 | --- | --- | --- | --- |
 | STN consistency + witness schedule + negative cycle | Bellman-Ford from a virtual source, predecessor walk for the cycle | `O(n m)` time, `O(n + m)` memory | done |
 | STN minimal network | Floyd-Warshall with early negative-diagonal stop | `O(n^3)` time, `n^2` cells | done |
-| STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) or P³C (Planken, de Weerdt and van der Krogt 2008) | `O(n m + n^2 log n)` | later, only if needed |
+| STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) | `O(n m + n^2 log n)` | later, only if needed |
 | STN incremental consistency | keep the closed matrix; reject a constraint closing a negative cycle | `O(n^2)` per constraint, `n^2` cells | done |
 | Extended dispatchable STNU (default) | Morris 2014 dispatchable variant, then `minDispESTNU` without diamond stand-ins | `O(n m + k n^3)` | done |
 | Extended dispatchable STNU, reference | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
@@ -346,6 +364,7 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
 | Layer | What | Status |
 | --- | --- | --- |
 | Example tests | Hand-written networks with known answers (rover example) | done |
+| Paper examples | The papers' own examples with their stated answers (`tests/it/papers.rs`): DMP 1991 Table 1, MMV 2001 Fig. 2, Hunsberger 2009 Figs. 1 and 2, the Morris 2014 section 4 cycle | done |
 | Property tests (proptest) | BF and FW agree; schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
 | Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | milestone 2 |
 | Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; every checker and dispatchable-network algorithm must match the same-tick game, and on the next-tick transformation the next-tick game; next-tick DC implies same-tick DC; mutations (run by hand, recorded in the commit messages) must make it fail: closure rules and unsuitability; Morris unsuitability, recursion, lower-case edges, derived edges, stop at non-negative distance, normalisation; RUL⁻ non-length-preserving Upper⁻, blocker check, Lower⁻, the `u - l` bound, seeding with the own lower-case edge, normalisation | done |
@@ -420,13 +439,13 @@ harness so that either can be run alone.
   which variant the CSTNU-Tool STNU checker uses before differential testing. Reaction delays
   of more than one tick would generalise the transformation (`C' = C + ε`); not exposed.
 - Minimal ESTNU: the default network is bounded and reduced, but its dispatchability rests on
-  Morris's theorem for the unreduced network plus simulation for the reduction. Either prove
+  simulation alone: Morris (2014) proves that PP-complete basic projections make an ESTNU
+  dispatchable, but only argues informally that the normal-form `determineDC+` achieves that,
+  and the variant here does not use the normal form. Either prove
   the reduction for this dispatcher, or implement `RTE*` (propagation along waits) onboard and
   enable the diamond stand-ins for a truly minimal network. Default: no diamonds.
-- Morris 2014 itself was not available. The implementation follows its description in
-  Hunsberger and Posenato (2023, section 2.1.1) and CSTNU-Tool's `applyMorris2014`,
-  `applyNormalForm` and `morris2014DCBackpropagation` (read, not copied); compare with the
-  paper before citing it publicly.
+- Morris 2014: now compared with the paper (section 12). The checker matches Fig. 1 up to
+  the documented deviations; the dispatchable variant is CSTNU-Tool's, not the paper's.
 - Explanations: the compact form avoids the exponential expansion. The TIME 2024 SRN-cycle
   finder (Hunsberger and Posenato) would give shorter cycles; not implemented. Whether
   operators want the nested form or a minimal expanded cycle is open.
@@ -436,7 +455,13 @@ harness so that either can be run alone.
   built-in policies (as late as possible, preferred times) or leaves that to the executive via
   `can_execute`/`execute`.
 - Whether onboard incremental re-checking is required, and its budget.
-- Whether contingent links with `l = 0` must be supported (some literature allows `0 <= l`).
+- Whether contingent links with `l = 0` must be supported. Morris 2014 allows `0 <= l < u`
+  (its normal form has `l = 0`); MMV 2001 and Hunsberger 2009 require `0 < l < u`. Default:
+  reject `l = 0`, accept `l = u` (see section 12).
+- Conflicts for relaxation: Bhargava, Vaquero and Williams (2017) report, besides the cycle,
+  one alternative constraint per lower-case edge on it (its extension must become
+  non-negative). Only the cycle is exposed. Default: not added until a relaxation planner
+  needs it.
 - Encoding (decided, section 7.1): fixed-width records with `u32` indices and a CRC-32.
   Open: whether the uplink needs authentication (a MAC is the transport layer's job in the
   current design), and whether a variable-length form is worth the loss of random access.
@@ -447,15 +472,111 @@ harness so that either can be run alone.
 - Dispatcher storage (decided): const-generic arrays loaded in place. Open: whether an
   executive needs run-time sizing over caller-provided `&mut [..]` buffers.
 
+## 12. Validation against the papers
+
+Each paper below was downloaded and read in full, then compared with the code rule by rule.
+Status: *matches*, *deviation* (deliberate, with the reason), *bug fixed*, or *not
+implemented*. Examples from the papers with their stated answers are tests in
+`tests/it/papers.rs`; all pass, and none of the comparisons below found a bug in the code.
+
+### 12.1 Morris, CPAIOR 2014 (`stnu/morris.rs`, `stnu/estnu.rs`)
+
+| Paper | Code | Status |
+| --- | --- | --- |
+| Contingent links: `0 <= l < u < ∞`, no shared contingent points (section 2) | `0 < l <= u < ∞`; contingent points are created by `add_contingent_link`, so never shared | deviation: `l = 0` rejected (open question, section 11); `l = u` accepted, its upper-case edge weighs `0` in normal form and is treated as ordinary, which is the normal-form label removal |
+| DC: time-based history (after Hunsberger 2009) including the present, i.e. instantaneous reaction (section 2) | `Reaction::SameTick`, on integer ticks | matches; integer time is a deviation, checked by the brute-force oracle |
+| Labelled distance graph: each contingent link gives ordinary edges `A -> C: u`, `C -> A: -l` plus `A -> C: c:l`, `C -> A: C:-u` (section 3) | labelled edges only | deviation, as in Cairo, Hunsberger and Rizzi (2018) and CSTNU-Tool: each labelled edge is at least as tight as the ordinary one it shadows; the oracle tests find no verdict change |
+| Normal form (section 3) and separated activation nodes (`B <= A -> A' [0, 0]`, before Fig. 1) | both at once: link `i` gets its own node `A'_i = A_i + l_i`, tied by `A_i -> A'_i: l_i`, `A'_i -> A_i: -l_i` | matches (one `[l, l]` tie instead of `[0, 0]` plus `[l, l]`) |
+| `determineDC`: `DCbackprop` from every negative node | `run` loops over negative nodes | matches |
+| Lines 00-03: an ancestor call with the same source means not DC; a finished one returns true | `Status::Active` returns the cycle trace, `Status::Done` returns at once | matches |
+| Lines 08-11: seed `distance(start(e)) = weight(e)` for every incoming edge | seed only negative incoming edges, keeping the minimum per tail | deviation: a non-negative seed only re-adds its own edge (line 14), and with parallel edges plain assignment could replace a negative seed by a larger one |
+| Lines 12-18: pop the closest node; at `distance >= 0` add the edge `u -> source` and do not extend | linear-scan extract-min, lowest index on ties; non-negative derived edge, self-loops not stored | matches (tie-breaking unspecified in the paper) |
+| Lines 19-21: a negative node popped at negative distance is processed recursively first | same, before scanning its incoming edges | matches |
+| Lines 22-26: skip negative edges and unsuitable edges (the lower-case edge of the source's own upper-case label) | same; the label is a property of the source thanks to the separation | matches |
+| Footnote 3: Dijkstra stays valid because only the initial edges are negative | derived edges are non-negative, negative edges are never extended | matches |
+| Theorem 3: a recursive repetition iff not DC | the verdict; also cross-checked against RUL⁻, RUL2021, the per-label backprop, the closure and the oracle | matches (relied on, tested) |
+| Complexity `O(N^3)`: at most `N` non-trivial calls of `O(N^2)` with a Fibonacci heap, `O(N^2)` added edges (section 4) | `O(n m + n^3)` with a linear scan; equal to `O(n^3)` when `m = O(n^2)` | matches; the paper's per-call `O(N^2)` presumes `E = O(N^2)`, which the crate states explicitly |
+| `determineDC+`: save the negative edges and waits found at negative distance (end of section 4) | `estnu.rs`: CSTNU-Tool's variant without normal form (its ties would end up in the output), one upper-case pass per link a node activates, then an ordinary pass | deviation: the passes are not from the paper |
+| Dispatchable ESTNU: Theorem 4 (dispatchable implies DC), Theorems 5-7 (PP-complete basic projections make every projection dispatchable) | not re-proven; the paper argues only informally that `determineDC+` reaches PP completeness | evidence for `Morris2014` and `Minimal` networks is simulation under all agent and nature policies |
+| ESTNU dispatching execution: free choices only for executable points, respect waits and precedences, propagate to neighbours (section 5) | `Dispatcher` | matches |
+| Section 4 example cycle `E -> B -> A -> B -> D -> C -> D -> B -> A -> B -> E` | `morris_2014_example_cycle_is_not_dc` (lower bounds 1 instead of 0, same path weights) | matches |
+
+### 12.2 Hunsberger, TIME 2009 (semantics, `stnu/reaction.rs`, the oracle)
+
+| Paper | Code | Status |
+| --- | --- | --- |
+| STNU with a zero point `Z` before every other point; `0 < l < u` | no implicit `Z`: only differences are constrained, a reference point is added by the integrator (the generated test networks have one with a horizon) | deviation: keeps the network translation-invariant |
+| Counter-example `N!` (Fig. 2): MMV's DES definition admits a strategy with advance knowledge | `hunsberger_2009_counter_example_is_not_dc`: not DC under both reactions, all checkers | matches |
+| DES*: decisions at time `k` depend on the contingent events strictly before `k` (pre-history relative to a time, not a time point) | `Reaction::NextTick`: the oracle's agent moves first in a tick and sees the full history before it; the checkers run on the network shifted by one tick | matches as the discrete analogue (one tick instead of an arbitrarily small reaction time); the default `SameTick` is Morris's variant including the present |
+| RTED strategies (WAIT, `(τ, χ)`) and MMV's execution procedure (Fig. 3) | the dispatcher's `step` (observe, then execute what is enabled) | matches in substance; not used as a proof |
+| Fig. 1 triangles: precede case infers `B - A` in `[5, 8]`, unordered case a wait of 13 | `hunsberger_2009_precede_case_tightens`, `hunsberger_2009_unordered_case_waits` (all three dispatchable-network algorithms) | matches |
+
+### 12.3 Morris, Muscettola and Vidal, IJCAI 2001
+
+| Paper | Code | Status |
+| --- | --- | --- |
+| STNU, projections, `0 < l < u`, independent durations, no shared contingent points | `Stnu` | matches, except `l = u` accepted (MMV: "may as well replace e by a requirement link") |
+| DC excludes the present | `Reaction::NextTick` (see 12.2) | default differs deliberately |
+| Wait `<C, t>` on `AB`: `B` waits until `C` happened or `t` after `A` | `Wait { waiter, contingent, delay }`, released as in MMV Fig. 5 | matches |
+| Execution (Fig. 5): forced execution at upper bounds, live and enabled points, waits | `Dispatcher::step` executes as soon as possible; with `can_execute`/`execute` the executive must respect upper bounds itself (missed deadlines are reported) | matches in substance |
+| Fig. 2: a network 3DC accepts but that is not DC | `mmv_2001_quiescent_network_is_not_dc` | matches |
+| The triangle reductions and wait regression themselves | not implemented; the closure uses the labelled-graph rules of Morris and Muscettola (2005) as restated by Morris 2014 | not implemented (superseded) |
+
+### 12.4 Dechter, Meiri and Pearl, AIJ 1991 (`stn/*`)
+
+The available PDF is a scan; it was read after OCR, whose formulas are partly garbled. The
+complexity statements were cross-checked against P³C's restatement of DPC.
+
+| Paper | Code | Status |
+| --- | --- | --- |
+| STP, distance graph (`hi` forward, `-lo` backward) | `Stn` | matches |
+| Theorem 3.1: consistent iff no negative cycle; Corollary 3.2: schedules from distances of `X_0` | Bellman-Ford from a virtual source | matches; the virtual source is our adaptation |
+| Theorem 3.3 and Corollaries 3.4, 3.5: the d-graph is decomposable and the minimal network | `MinimalNetwork`; tightness property test | matches |
+| Floyd-Warshall, negative cycles seen on the diagonal | same, stopping at the first negative diagonal entry before its round | matches; the early stop is ours (keeps distances from diverging) |
+| Example 1.1, Table 1 | `dmp_table_1_minimal_network`, `dmp_bus_and_carpool_is_inconsistent` | matches |
+
+### 12.5 Bhargava, Vaquero and Williams, IJCAI 2017 (`stnu/morris.rs`, `stnu/explanation.rs`)
+
+| Paper | Code | Status |
+| --- | --- | --- |
+| Algorithm 1/2: Morris 2014 in normal form; on a recursive repetition, unwind the call stack and collect each frame's shortest path from the interrupting node to the source | `Trace`, `extend_trace` | matches |
+| Two distance arrays per search (labelled and unlabelled) | one array: the separated activation nodes make the label a property of the source | deviation (equivalent) |
+| Seeds: negative incoming edges, by assignment (lines 6-8) | negative incoming edges, minimum per tail | matches; the minimum is safer with parallel edges |
+| Line 28: a lower-case edge is skipped if its label matches the search label | same | matches |
+| Novel edges are expanded recursively into STNU constraints | compact form: each derived edge listed once with its path; `edges()` expands lazily | deviation: the full expansion can need `3 * 2^k - 2` edges (magic loops); the compact form is `O(n^3)`. Our observation, not the paper's: its `O(n^2)` bound for conflict extraction counts the unwinding, not the recursive expansion |
+| A conflict is the cycle plus, per lower-case edge, the constraint that its extension becomes non-negative | the cycle only | not implemented (open question, section 11) |
+| `RELAXIDC`, incremental re-checks | none | not implemented (out of scope) |
+
+### 12.6 Muscettola, Morris and Tsamardinos, KR 1998
+
+Not available (no verified free copy; dblp `conf/kr/MuscettolaMT98`). The different AAAI 1998
+paper by Tsamardinos, Muscettola and Morris ("Fast transformation of temporal plans for
+efficient execution") was not used as a substitute and was not read. What the code relies on
+(dispatchability, dominance rules, minimum dispatchable network) is checked only against its
+restatement in Morris 2014, section 5:
+
+| Restated rule (Morris 2014) | Code (`stn/dispatchable.rs`) | Status |
+| --- | --- | --- |
+| A minimum dispatchable network keeps the undominated all-pairs edges and one edge of each group of mutually dominating ones | rigid components get a leader; dominance among leaders | matches the restatement; minimality not tested |
+| A negative `A -> B` is lower-dominated if a shortest path to `B` has a negative prefix `A -> C` | negative `a -> c` dropped if a negative `a -> b` has `D[a][b] + D[b][c] = D[a][c]` | matches |
+| A non-negative `A -> B` is upper-dominated if a shortest path has a non-negative suffix `C -> B` | non-negative `a -> c` dropped if a non-negative `b -> c` has `D[a][b] + D[b][c] = D[a][c]` | matches |
+
 ## References
 
-Verified against the CSTNU-Tool page
-(<https://profs.scienze.univr.it/~posenato/software/cstnu/>):
+Read in full and compared with the code (section 12):
 
-- L. Hunsberger and R. Posenato. Speeding up the RUL⁻ dynamic-controllability-checking
-  algorithm for Simple Temporal Networks with Uncertainty. AAAI 2022.
-- L. Hunsberger and R. Posenato. Sound-and-complete algorithms for checking the dynamic
-  controllability of Conditional Simple Temporal Networks with Uncertainty. TIME 2018.
+- R. Dechter, I. Meiri and J. Pearl. Temporal constraint networks. Artificial Intelligence 49
+  (1991) 61-95.
+- P. Morris, N. Muscettola and T. Vidal. Dynamic control of plans with temporal uncertainty.
+  IJCAI 2001, 494-499.
+- L. Hunsberger. Fixing the semantics for dynamic controllability and providing a more
+  practical characterization of dynamic execution strategies. TIME 2009.
+- P. Morris. Dynamic controllability and dispatchability relationships. CPAIOR 2014, LNCS
+  8451 (read from the NASA NTRS copy, which has no page numbers).
+- N. Bhargava, T. Vaquero and B. Williams. Faster conflict generation for dynamic
+  controllability. IJCAI 2017, 4280-4286.
+- L. Planken, M. de Weerdt and R. van der Krogt. P³C: a new algorithm for the simple temporal
+  problem. ICAPS 2008, 256-263.
 
 Read in full while implementing the STNU checkers:
 
@@ -465,19 +586,22 @@ Read in full while implementing the STNU checkers:
   with uncertainty into dispatchable form. Information and Computation 293, 2023 (section
   2.1.1 describes Morris 2014).
 
-From memory, **not verified** (check before citing in public material):
+Verified against the CSTNU-Tool page
+(<https://profs.scienze.univr.it/~posenato/software/cstnu/>):
 
-- R. Dechter, I. Meiri and J. Pearl. Temporal constraint networks. Artificial Intelligence 49,
-  1991.
+- L. Hunsberger and R. Posenato. Speeding up the RUL⁻ dynamic-controllability-checking
+  algorithm for Simple Temporal Networks with Uncertainty. AAAI 2022.
+- L. Hunsberger and R. Posenato. Sound-and-complete algorithms for checking the dynamic
+  controllability of Conditional Simple Temporal Networks with Uncertainty. TIME 2018.
+
+Cited with bibliographic data from the reference lists of the papers above, content not
+read:
+
 - N. Muscettola, P. Morris and I. Tsamardinos. Reformulating temporal plans for efficient
-  execution. KR 1998.
-- P. Morris, N. Muscettola and T. Vidal. Dynamic control of plans with temporal uncertainty.
-  IJCAI 2001.
-- L. Hunsberger. Fixing the semantics for dynamic controllability and providing a more
-  practical characterization of dynamic execution strategies. TIME 2009.
-- P. Morris. Dynamic controllability and dispatchability relationships. CPAIOR 2014, LNCS
-  8451 (bibliographic data verified; content only known through the two papers above).
-- N. Bhargava, T. Vaquero and B. Williams. Faster conflict generation for dynamic
-  controllability. IJCAI 2017.
-- L. Planken, M. de Weerdt and R. van der Krogt. P³C: a new algorithm for the simple temporal
-  problem. ICAPS 2008.
+  execution. KR 1998 (not available; see 12.6).
+- P. Morris. A structural characterization of temporal dynamic controllability. CP 2006,
+  LNCS 4204, 375-389 (semi-reducible negative cycles; restated in Morris 2014).
+- P. Morris and N. Muscettola. Temporal dynamic controllability revisited. AAAI 2005,
+  1193-1198 (labelled distance graph; restated in Morris 2014).
+- L. Hunsberger. Magic loops in simple temporal networks with uncertainty. ICAART 2013 (2),
+  157-170.

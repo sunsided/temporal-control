@@ -13,8 +13,11 @@
 //! events come first, then the agent acts. This is the semantics under which the edge-generation
 //! rules used here are exact; the integration tests check it against a brute-force game solver.
 //! It requires the executive to deliver observations before it asks for executions in a tick,
-//! as [`Dispatcher::step`](crate::Dispatcher::step) does. A system that can only react one tick
-//! later needs the stricter variant, which is not implemented (see `docs/design.md`).
+//! as [`Dispatcher::step`](crate::Dispatcher::step) does. It is the variant Morris (CPAIOR
+//! 2014) uses: time-based histories as fixed by Hunsberger (TIME 2009), but including the
+//! present. A system that can only react one tick later needs the stricter variant, the
+//! discrete analogue of Hunsberger's DES* (decisions at `t` see contingent events strictly
+//! before `t`): check [`Stnu::with_reaction`] with [`Reaction::NextTick`] instead.
 //!
 //! ```mermaid
 //! graph LR
