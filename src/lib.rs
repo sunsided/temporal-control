@@ -46,7 +46,7 @@
 //! ## Status
 //!
 //! Pre-release (0.0.0). Milestone 1 (STN) and most of milestones 2 and 3 (STNU, dispatchable
-//! form, dispatcher) are implemented; the API will change.
+//! form, dispatcher, encoding) are implemented; the API will change.
 //!
 //! Repository: <https://github.com/sunsided/temporal-control>
 

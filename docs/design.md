@@ -154,6 +154,26 @@ constraint violated or empty window (the network was not dispatchable), time goi
 capacity. Observations are recorded even when they violate an assumption, so monitoring
 continues. The dispatcher never panics on any input; all tick arithmetic is checked.
 
+**Construction and storage (onboard).** `Dispatcher<N, E, I = usize>` is a plain
+fixed-capacity struct. `Dispatcher::EMPTY` is a `const`, so flight software places it in
+static memory (behind its own cell or critical-section type; the crate stays
+`forbid(unsafe_code)`) and calls `load(points, edges, waits)` or `load_encoded(bytes)` for
+each plan. Loading validates completely before the first write, so a rejected plan leaves the
+dispatcher, including a plan in execution, unchanged; it fills the arrays in place with a
+counting sort inside the offset array and needs no stack proportional to `N` or `E`.
+`Dispatcher::new` (and `DispatchableNetwork::dispatcher`) remain as by-value shorthands.
+Chosen over a variant borrowing caller-provided `&mut [..]` buffers: the const-generic struct
+already gives static placement with compile-time sizes and no lifetimes in the executive,
+and a second storage form would duplicate the dispatcher (open question in section 11).
+
+Internal handles (adjacency targets, range offsets, precedence counters, activation links)
+are stored as `I`, a sealed `Index` trait for `u16`, `u32` and `usize`; public handles stay
+`TimePoint(usize)`. A network fits iff its point and entry counts are at most `I::MAX`, else
+loading fails with `DispatchError::IndexTypeTooSmall`. Measured per point and per entry slot:
+80 and 16 bytes on `thumbv7em` with `usize` or `u32`, 76 and 16 with `u16`; on `x86_64` 96 and
+24 with `usize`. The saving on 32-bit targets is small because windows and entries hold
+8-byte-aligned `i64` ticks.
+
 ## 4. Algorithm choices
 
 | Problem | Algorithm | Cost | Status |
@@ -201,11 +221,13 @@ graph LR
 | --- | --- | --- |
 | `Ticks`, `Budget`, `Error` | none | always available |
 | STN, STNU, DC checking, explanations, dispatchable generation | `alloc` (default feature) | ground side; may also run onboard on a capable processor |
-| Compact dispatchable encoding, validator, dispatcher | none | caller-provided buffers or const-generic capacity; `O(degree)` work per event |
+| Compact dispatchable encoding (decoder, validator, `encode_into`), dispatcher | none | const-generic capacity, in-place loading from a `const EMPTY`; `O(degree)` work per event |
+| `DispatchableNetwork::encode` / `decode` | `alloc` | ground side; `decode` runs exactly the onboard checks |
 
-The onboard side must work without `alloc`: it validates a received encoding (bounds, indices,
-checksum, structural invariants such as "every contingent link has a valid activation point")
-against fixed capacities and refuses anything that does not fit. It never runs a DC check. An
+The onboard side works without `alloc`: `Dispatcher::load_encoded` validates a received
+encoding (framing, length, CRC-32, canonical form, indices, bounds, structural invariants such
+as "every contingent link has a valid activation point", capacities, index type) directly in
+the received bytes and refuses anything that does not fit (section 7.1). It never runs a DC check. An
 optional bounded *incremental* re-check (for replanning after a reset) is a later decision.
 
 ## 6. Budgets and error model
@@ -233,9 +255,11 @@ optional bounded *incremental* re-check (for replanning after a reset) is a late
   negative cycle of named constraint bounds).
 - `Error::Internal` means two independent checks disagreed or an invariant broke. The safe
   reaction for an executive is the same as for an inconsistent plan: do not dispatch.
-- Onboard (planned): the dispatcher has fixed capacities. Capacity, out-of-window observations
-  and missed deadlines are reported as typed events; the dispatcher never panics and never
-  executes a point outside its window.
+- Onboard: the dispatcher has fixed capacities. Capacity, index-type overflow, out-of-window
+  observations and missed deadlines are reported as typed `DispatchError`s, malformed
+  encodings as typed `DecodeError`s; the dispatcher and the decoder never panic (property
+  tests, fuzzing, Kani harnesses in section 8) and never execute a point outside its window.
+  A rejected load changes nothing.
 
 ## 7. Explanation format
 
@@ -327,22 +351,49 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
 | Differential (internal) | Incremental STN vs from-scratch Floyd-Warshall after every constraint; every STNU checker vs the closure on STNUs up to 7 executable points and 4 links; STNU without links vs STN; filtered STN vs its minimal network | done |
 | Explanations | Every SRN cycle chains, closes with its stated negative weight, and its requirement bounds alone are not DC (oracle on small, closure on medium networks) | done |
 | Simulated dispatch | DC networks (and dispatchable STNs) under ASAP, latest and random agents and min, max and random nature: no dispatcher error, every requirement and contingent bound holds | done; resets and overruns: milestone 4 |
-| Fuzzing | `cargo fuzz` targets for construction, the checks, and the onboard decoder/validator (must reject, never panic) | milestone 2 (decoder: milestone 3) |
-| Model checking | Kani harnesses for the dispatcher step function and the decoder on small fixed capacities: no panic, no overflow, windows respected | milestone 3 |
+| Encoding | Round trips of dispatchable STNs and ESTNUs (decode equals the original, re-encoding is byte-identical, simulated dispatch from decoded `usize` and `u16` dispatchers matches the original run); every single-bit flip and every truncation of a sample encoding is rejected and leaves a busy dispatcher unchanged; each `DecodeError`; random bytes and random records behind a valid header and CRC never panic | done |
+| Fuzzing | Standalone `fuzz/` crate (not a workspace member): `decode` (raw bytes and framed random records; onboard and ground decoders agree), `dispatch` (arbitrary networks and call sequences, `usize` and `u16` dispatchers agree, rejected loads change nothing), `dc_checkers` (STNUs up to 8 points: all checkers and the closure agree, DC networks load and round-trip). Run with `cargo +nightly fuzz run <target> -- -max_total_time=60`; 60 s each found nothing | done; construction-only target and CI runs open |
+| Model checking | Kani harnesses for the dispatcher calls and the decoder on small fixed capacities: no panic, no overflow, windows respected | written, run on concrete inputs in unit tests; never run under Kani (not installed) |
 | Simulation | deterministic replay with injected contingent durations and resets: DC network plus dispatcher never violates a requirement constraint | milestone 4 |
+
+**Kani harnesses.** `src/dispatch/proofs.rs` holds bounded no-panic checks as ordinary
+functions: a dispatcher with capacity 3 points and 7 entries loads an arbitrary (possibly
+malformed) network of up to 3 points, 3 edges and one wait, then runs 3 arbitrary calls
+(`observe`, `execute`, `can_execute`, `step`, `check_deadlines`), asserting that a point only
+executes inside its window and is then recorded; and the decoder gets arbitrary bytes of up
+to 61 bytes, or one arbitrary point record and one edge record behind a valid header and
+CRC. Unit tests run these checks on 20,000 pseudo-random concrete inputs each. The
+`#[cfg(kani)]` harnesses (`proofs::harnesses`, for `u16` and `usize` indices) run them on
+fully symbolic inputs; normal builds ignore them (`unexpected_cfgs` knows `cfg(kani)`).
+Kani is not installed in the development environment, so the harnesses have only been
+type-checked against a stub, never run. To run them:
+
+```sh
+cargo install --locked kani-verifier && cargo kani setup
+cargo kani --lib                                       # all harnesses
+cargo kani --lib --harness dispatcher_never_panics_u16 # one harness
+```
+
+The unwind bound (9 for the dispatcher, 66 for the decoder) covers the longest loop (the
+CRC over 57 bytes); if Kani reports an unwinding assertion failure, raise it. The CRC over
+symbolic bytes may make the framed decoder harness slow; it is separate from the raw-bytes
+harness so that either can be run alone.
 
 ## 9. Milestones
 
 1. **STN** (done on `draft/initial`): construction, BF consistency with witness or negative
    cycle, FW minimal network, budgets, property tests, `thumbv7em-none-eabihf` build.
 2. **STNU and DC**: contingent links, labelled-closure checker, Morris 2014 `O(n^3)` checker,
-   RUL⁻, RUL2021, per-label backprop, SRN-cycle explanations, brute-force oracle (done). Open:
-   CSTNU-Tool differential harness, fuzz targets.
+   RUL⁻, RUL2021, per-label backprop, SRN-cycle explanations (compact), next-tick reaction by
+   transformation, brute-force oracle, fuzz target cross-checking every checker (done). Open:
+   CSTNU-Tool differential harness.
 3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN, bounded and reduced
    dispatchable ESTNU (Morris 2014 dispatchable + `minDispESTNU` without diamonds),
    `no_std`/no-`alloc` dispatcher with fixed capacity and input validation, incremental STN
-   consistency (done). Open: provably minimal ESTNU for this dispatcher (or an `RTE*`
-   dispatcher), compact encoding with checksum, Kani harnesses.
+   consistency, in-place loading from a `const EMPTY`, `u16`/`u32` index types, compact
+   checksummed encoding with a no-`alloc` decoder, fuzz targets, Kani harnesses (done; the
+   harnesses have not been run under Kani yet). Open: provably minimal ESTNU for this
+   dispatcher (or an `RTE*` dispatcher), running Kani in CI.
 4. **Simulation**: deterministic simulator with injected durations, resets and overruns.
 5. **Adapters**: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
 
@@ -385,9 +436,15 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
   `can_execute`/`execute`.
 - Whether onboard incremental re-checking is required, and its budget.
 - Whether contingent links with `l = 0` must be supported (some literature allows `0 <= l`).
-- Encoding format for the dispatchable network (versioned, checksummed; fixed-width integers).
-- Whether `usize` handles are acceptable for the onboard encoding or a `u16`/`u32` index type is
-  needed.
+- Encoding (decided, section 7.1): fixed-width records with `u32` indices and a CRC-32.
+  Open: whether the uplink needs authentication (a MAC is the transport layer's job in the
+  current design), and whether a variable-length form is worth the loss of random access.
+- Index type (decided): `Dispatcher<N, E, I>` with `I` in `u16`, `u32`, `usize` (default).
+  Open: on 32-bit targets it saves only 4 bytes per point; packing ticks into unaligned
+  storage (12-byte entries with `u16`) would save about a quarter of the entry memory at some
+  cost per access. Default: not done until a mission's capacities need it.
+- Dispatcher storage (decided): const-generic arrays loaded in place. Open: whether an
+  executive needs run-time sizing over caller-provided `&mut [..]` buffers.
 
 ## References
 

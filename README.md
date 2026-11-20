@@ -19,9 +19,12 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | STNU dynamic controllability: RUL2021 (Hunsberger and Posenato 2022) | done |
 | STNU dynamic controllability: per-label backpropagation (cross-check) | done |
 | Explanations of non-controllability (semi-reducible negative cycles) | done |
-| Onboard dispatcher, `no_std` without `alloc`, fixed capacity | done |
-| Compact checksummed encoding of dispatchable networks | planned |
-| Differential tests against CSTNU-Tool, fuzzing, Kani harnesses | planned |
+| Onboard dispatcher, `no_std` without `alloc`, fixed capacity, loaded in place from a `const EMPTY` | done |
+| `u16`/`u32`/`usize` index types for the dispatcher's internal handles | done |
+| Compact checksummed encoding (CRC-32) of dispatchable networks, no-`alloc` decoder | done |
+| `cargo fuzz` targets: decoder, dispatcher calls, DC checker agreement | done |
+| Kani harnesses for the dispatcher and the decoder | written, not yet run under Kani |
+| Differential tests against CSTNU-Tool | planned |
 
 Reaction-time semantics: an observation at tick `t` may trigger executions at the same tick.
 Next-tick reaction is supported by transforming the network (`Stnu::with_reaction`).
