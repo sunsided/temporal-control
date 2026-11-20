@@ -15,11 +15,9 @@
 //! - edge `x -> y` with weight `w` and `x` happened: `ub[y] = min(ub[y], t + w)`;
 //! - edge `y -> x` with weight `w` and `x` happened: `lb[y] = max(lb[y], t - w)`.
 //!
-//! An edge `x -> y` with weight `w` is a *precedence* edge if `w < 0`, or if `w = 0` and
-//! `y < x` (by index): `y` must happen no later than `x`, and for zero weights the index breaks
-//! the tie so that zero-weight cycles (simultaneous points) cannot deadlock. Every cycle of
-//! precedence edges would be a negative cycle or a zero cycle with strictly decreasing indices,
-//! so in a consistent network there is none.
+//! An edge `x -> y` with weight `w < 0` is a *precedence* edge: `y` must happen strictly
+//! before `x`. A consistent network has no cycle of precedence edges. Zero-weight edges are
+//! not precedence edges; `x` may happen first and then caps `y`'s window at its own time.
 //!
 //! An executable point `x` may execute at `now` iff it has not happened, every precedence edge
 //! `x -> y` has `y` happened, `lb[x] <= now <= ub[x]`, and every wait `(x, c, d)` is satisfied:
@@ -705,7 +703,7 @@ impl<const N: usize, const E: usize> Dispatcher<N, E> {
 
 /// Whether edge `from -> to` with `weight` makes `from` wait for `to` (see the module docs).
 fn is_precedence(from: usize, to: usize, weight: Ticks) -> bool {
-    weight < Ticks::ZERO || (weight == Ticks::ZERO && to < from)
+    weight < Ticks::ZERO && from != to
 }
 
 /// Writes `entry` at `*cursor` and advances the cursor.

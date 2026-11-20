@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0677185cb44f6dbc6f7e154085bc0880fa61fee8e419908c6006a68042771f45 # shrinks to spec = StnSpec { n: 6, constraints: [(0, 1, Some(0), None), (5, 0, Some(54), None), (1, 2, Some(-49), None)] }, seed = 37262702292135521

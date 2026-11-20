@@ -177,3 +177,25 @@ proptest! {
             || limited == stn.dispatchable(&Budget::UNLIMITED));
     }
 }
+
+/// Upper dominance through a zero-weight edge: `t_0`'s deadline reaches it only through `t_1`.
+///
+/// Regression: with zero-weight edges counted as precedence, `t_1` waited for `t_0`, which had
+/// no deadline of its own, and `t_1` missed its deadline.
+#[test]
+fn zero_weight_dominance_does_not_deadlock() {
+    let mut stn = Stn::new();
+    let p: Vec<TimePoint> = (0..6).map(|_| stn.add_time_point().unwrap()).collect();
+    stn.add_constraint(p[0], p[1], Some(Ticks(0)), None)
+        .unwrap();
+    stn.add_constraint(p[5], p[0], Some(Ticks(54)), None)
+        .unwrap();
+    stn.add_constraint(p[1], p[2], Some(Ticks(-49)), None)
+        .unwrap();
+    let net = dispatchable(&stn).unwrap();
+
+    for seed in 1..200 {
+        let times = sim::run(&net, Agent::Random, Nature::Random, &mut Rng(seed));
+        sim::assert_satisfies(&stn, &times);
+    }
+}

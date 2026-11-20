@@ -6,9 +6,12 @@
 //! 1. **Rigid components.** Points `i, j` with `D[i][j] + D[j][i] = 0` have a fixed offset.
 //!    Each component gets a leader, its earliest member (lowest index on ties). Every other
 //!    member is tied to the leader by the two edges `leader -> m` and `m -> leader`, and all
-//!    other constraints are expressed between leaders only. With the earliest member as leader,
-//!    members never need to execute before their leader, so the dispatcher learns their exact
-//!    time from the leader in time.
+//!    other constraints are expressed between leaders only. A member strictly after its leader
+//!    waits for it through the negative edge `m -> leader` and learns its exact time from it.
+//!    A member at offset zero has no negative edge to its leader, so it could run first with an
+//!    unconstrained window; it therefore receives a copy of every leader edge (step 2), which
+//!    keeps its window equal to the leader's. This is the dispatcher-level equivalent of
+//!    collapsing simultaneous points into one node.
 //! 2. **Dominance among leaders.** For leaders `a, b, c` (pairwise distinct):
 //!    - a non-negative edge `a -> c` is *upper-dominated* by a non-negative edge `b -> c` if
 //!      `D[a][b] + D[b][c] = D[a][c]`;
@@ -18,7 +21,8 @@
 //!    Dominated edges are dropped. Leaders are pairwise non-rigid, so no two edges dominate
 //!    each other and all dominated edges can be dropped at once.
 //!
-//! Cost: `O(n^3)` steps, `O(n)` extra memory plus the output.
+//! Cost: `O(n^3)` steps, `O(n)` extra memory plus the output. Copies for simultaneous members
+//! add `O(s^2)` edges per kept leader edge, `s` being the larger number of simultaneous points.
 
 use alloc::vec::Vec;
 
@@ -140,8 +144,35 @@ impl MinimalNetwork {
                 };
 
                 if a != c && !self.dominated(&heads, a, c, w)? {
-                    push_edge(edges, a, c, w)?;
+                    self.push_with_simultaneous(leaders, a, c, w, edges)?;
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Adds `a -> c` with weight `w` between every member at offset zero from leader `a` and
+    /// every member at offset zero from leader `c` (the leaders included).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::OutOfMemory`].
+    fn push_with_simultaneous(
+        &self,
+        leaders: &[usize],
+        a: usize,
+        c: usize,
+        w: Ticks,
+        edges: &mut Vec<DispatchEdge>,
+    ) -> Result<(), Error> {
+        let simultaneous = |l: usize| {
+            (0..self.n).filter(move |&i| leaders[i] == l && self.d(l, i) == Some(Ticks::ZERO))
+        };
+
+        for x in simultaneous(a) {
+            for y in simultaneous(c) {
+                push_edge(edges, x, y, w)?;
             }
         }
 
