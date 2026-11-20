@@ -1,4 +1,5 @@
-//! Benchmarks for the onboard dispatcher step and the ground-side DC checks.
+//! Benchmarks for the onboard dispatcher (step, loading an encoding) and the ground-side DC
+//! checks.
 
 use std::hint::black_box;
 
@@ -74,6 +75,12 @@ fn benches(c: &mut Criterion) {
     let net = network(10);
     c.bench_function("dispatch_chain_10", |b| {
         b.iter(|| dispatch_run(black_box(&net)));
+    });
+
+    let bytes = net.encode().unwrap();
+    let mut target = Box::new(Dispatcher::<32, 2048>::EMPTY);
+    c.bench_function("load_encoded_chain_10", |b| {
+        b.iter(|| target.load_encoded(black_box(&bytes)).unwrap());
     });
 
     let stnu = chain(10);
