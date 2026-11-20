@@ -18,7 +18,7 @@
 //!
 //! ```mermaid
 //! graph LR
-//!     stnu["Stnu"] -->|"dispatchable (labelled closure)"| v["Controllable(DispatchableNetwork) or Uncontrollable"]
+//!     stnu["Stnu"] -->|"dispatchable (Morris 2014 dispatchable, minimised)"| v["Controllable(DispatchableNetwork) or Uncontrollable"]
 //!     stnu -->|"check_controllability (Morris 2014, O(n^3))"| c["Controllable or Uncontrollable"]
 //!     stnu -->|"check_controllability_with (RUL-minus, per-label backprop)"| c
 //!     v --> d["Dispatcher (onboard)"]
@@ -31,7 +31,9 @@
 
 mod backprop;
 mod closure;
+mod estnu;
 mod explanation;
+mod min_disp;
 mod morris;
 mod rul;
 
@@ -99,6 +101,27 @@ pub enum DcAlgorithm {
     /// negative incoming edge, `O(n (k + 1) (m + n^2) log n)`. Kept as an independent
     /// cross-check.
     PerLabelBackprop,
+}
+
+/// Which algorithm [`Stnu::dispatchable_with`] uses to build the dispatchable network.
+///
+/// For `n` points, `k` links and `m` requirement bounds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DispatchAlgorithm {
+    /// [`DispatchAlgorithm::Morris2014`] followed by the `minDispESTNU` minimisation of
+    /// Hunsberger and Posenato (ICAPS 2024): stand-in edges, STN dispatchability filtering of
+    /// the ordinary edges, and removal of dominated waits. Without the paper's diamond
+    /// stand-ins, which only its `RTE*` executor can rely on, so the result is smaller than
+    /// Morris's but not proven minimal. `O(n m + k n^3)` time, `O(n^2)` cells.
+    #[default]
+    Minimal,
+    /// Morris's dispatchable variant of his 2014 algorithm: inserts every ordinary edge and
+    /// wait the backpropagation derives. `O((n + k)(m + n^2 + n k))` time, `n^2 + n k` cells.
+    Morris2014,
+    /// Closure of the labelled distance graph under the Morris-Muscettola rules, all-pairs.
+    /// `O(n^3 + n^2 k)` per round; the number of rounds is not proven (the budget bounds it).
+    /// Kept as the reference the others are checked against.
+    Closure,
 }
 
 /// A Simple Temporal Network with Uncertainty.
@@ -291,22 +314,52 @@ impl Stnu {
         }
     }
 
-    /// Checks dynamic controllability and derives a dispatchable extended STNU.
+    /// Checks dynamic controllability and derives a dispatchable extended STNU with few edges
+    /// ([`DispatchAlgorithm::Minimal`]).
     ///
-    /// Computes the closure of the labelled distance graph under the edge-generation rules of
-    /// Morris and Muscettola (no-case, upper-case, lower-case, cross-case, label removal) in
-    /// matrix form, checking the all-max projection for negative cycles after each round. The
-    /// result keeps every ordinary edge and every *wait* (upper-case edge) that is tighter than
-    /// the ordinary edge in parallel, which a [`Dispatcher`](crate::Dispatcher) executes.
+    /// The result keeps the ordinary edges and *waits* (conditional upper-case edges) that a
+    /// [`Dispatcher`](crate::Dispatcher) executes. See [`DispatchAlgorithm`] for the cost.
     ///
-    /// Each round costs `O(n^3 + n^2 k)` steps; the matrices take `3 n^2 + 2 n k` cells for `n`
-    /// points and `k` links, all checked against [`Budget::max_cells`] up front. shortcut:
-    /// termination and the number of rounds are not proven here (the tests only show agreement
-    /// with a brute-force oracle on small networks); the [`Budget`] bounds the work. Upgrade to
-    /// the Hunsberger-Posenato `FD_STNU` algorithm if a proven bound matters.
+    /// A negative verdict carries the explanation of [`Stnu::check_controllability`].
     ///
-    /// A negative verdict carries the explanation of [`Stnu::check_controllability`], which
-    /// then also runs (against a fresh copy of `budget`).
+    /// # Errors
+    ///
+    /// As for [`Stnu::dispatchable_with`].
+    pub fn dispatchable(
+        &self,
+        budget: &Budget,
+    ) -> Result<Controllability<DispatchableNetwork>, Error> {
+        self.dispatchable_with(DispatchAlgorithm::default(), budget)
+    }
+
+    /// Checks dynamic controllability and derives a dispatchable extended STNU with the chosen
+    /// `algorithm`.
+    ///
+    /// Every algorithm returns the same verdict, and every dispatchable network satisfies all
+    /// requirements under every dispatch the [`Dispatcher`](crate::Dispatcher) allows (checked
+    /// by simulation in the tests). A negative verdict carries the explanation of
+    /// [`Stnu::check_controllability`], which then also runs against a fresh copy of `budget`
+    /// (except for [`DispatchAlgorithm::Morris2014`] and [`DispatchAlgorithm::Minimal`], whose
+    /// verdict comes from the same propagation).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use temporal_control::{Budget, Controllability, DispatchAlgorithm, Stnu, Ticks};
+    ///
+    /// // Analysis must start within 2 ticks after a 5..15 tick warm-up ends.
+    /// let mut stnu = Stnu::new();
+    /// let start = stnu.add_time_point().expect("fits");
+    /// let warm = stnu.add_contingent_link(start, Ticks(5), Ticks(15)).expect("valid");
+    /// let analysis = stnu.add_time_point().expect("fits");
+    /// stnu.add_constraint(warm, analysis, Some(Ticks(0)), Some(Ticks(2))).expect("exists");
+    ///
+    /// let size = |algorithm| match stnu.dispatchable_with(algorithm, &Budget::UNLIMITED) {
+    ///     Ok(Controllability::Controllable(net)) => net.edges().len() + net.waits().len(),
+    ///     other => panic!("DC: {other:?}"),
+    /// };
+    /// assert!(size(DispatchAlgorithm::Minimal) <= size(DispatchAlgorithm::Closure));
+    /// ```
     ///
     /// # Errors
     ///
@@ -314,11 +367,27 @@ impl Stnu {
     /// - [`Error::OutOfMemory`] if the allocator refuses them.
     /// - [`Error::BudgetExhausted`] if the step budget runs out.
     /// - [`Error::Overflow`] if a path weight overflows `i64`.
-    /// - [`Error::Internal`] if the explaining checker finds the network DC.
-    pub fn dispatchable(
+    /// - [`Error::Internal`] if the explaining checker disagrees, or the minimisation finds an
+    ///   inconsistency in a network the check found DC.
+    pub fn dispatchable_with(
         &self,
+        algorithm: DispatchAlgorithm,
         budget: &Budget,
     ) -> Result<Controllability<DispatchableNetwork>, Error> {
-        closure::run(self, budget)
+        let estnu = match algorithm {
+            DispatchAlgorithm::Closure => return closure::run(self, budget),
+            DispatchAlgorithm::Morris2014 | DispatchAlgorithm::Minimal => estnu::run(self, budget)?,
+        };
+
+        let Some(estnu) = estnu else {
+            return morris::explain(self, budget).map(Controllability::Uncontrollable);
+        };
+
+        let net = match algorithm {
+            DispatchAlgorithm::Minimal => min_disp::run(self, estnu, budget)?,
+            _ => estnu.into_network(self)?,
+        };
+
+        Ok(Controllability::Controllable(net))
     }
 }

@@ -75,8 +75,8 @@ pub use stn::{
 };
 #[cfg(feature = "alloc")]
 pub use stnu::{
-    ContingentId, ContingentLink, Controllability, DcAlgorithm, LabelledEdge, SemiReducibleCycle,
-    Stnu,
+    ContingentId, ContingentLink, Controllability, DcAlgorithm, DispatchAlgorithm, LabelledEdge,
+    SemiReducibleCycle, Stnu,
 };
 pub use ticks::Ticks;
 pub use time_point::TimePoint;

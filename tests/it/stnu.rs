@@ -2,8 +2,8 @@
 
 use proptest::prelude::*;
 use temporal_control::{
-    Bound, Budget, ContingentId, Controllability, DcAlgorithm, DispatchableNetwork, Error,
-    LabelledEdge, SemiReducibleCycle, Stnu, Ticks, TimePoint,
+    Bound, Budget, ContingentId, Controllability, DcAlgorithm, DispatchAlgorithm,
+    DispatchableNetwork, Error, LabelledEdge, SemiReducibleCycle, Stnu, Ticks, TimePoint,
 };
 
 use crate::oracle::{self, Reaction};
@@ -16,16 +16,28 @@ const TEST_BUDGET: Budget = Budget {
     max_cells: 1 << 20,
 };
 
-/// The extended dispatchable network, or `None` if not DC. Panics on budget exhaustion.
+/// The default extended dispatchable network, or `None` if not DC. Panics on errors.
 fn estnu(stnu: &Stnu) -> Option<DispatchableNetwork> {
+    estnu_with(stnu, DispatchAlgorithm::default())
+}
+
+/// The extended dispatchable network of `algorithm`, or `None` if not DC. Panics on errors.
+fn estnu_with(stnu: &Stnu, algorithm: DispatchAlgorithm) -> Option<DispatchableNetwork> {
     match stnu
-        .dispatchable(&TEST_BUDGET)
-        .expect("closure fits the test budget")
+        .dispatchable_with(algorithm, &TEST_BUDGET)
+        .unwrap_or_else(|e| panic!("{algorithm:?}: {e}"))
     {
         Controllability::Controllable(net) => Some(net),
         Controllability::Uncontrollable(_) => None,
     }
 }
+
+/// Every algorithm behind [`Stnu::dispatchable_with`].
+const DISPATCHERS: [DispatchAlgorithm; 3] = [
+    DispatchAlgorithm::Minimal,
+    DispatchAlgorithm::Morris2014,
+    DispatchAlgorithm::Closure,
+];
 
 /// Every checker behind [`Stnu::check_controllability_with`].
 const ALGORITHMS: [DcAlgorithm; 3] = [
@@ -134,14 +146,17 @@ fn must_precede_unknown_end_is_not_dc() {
 #[test]
 fn wait_until_deadline_is_dc() {
     let stnu = wait_example(-10, 2, Some(8));
-    let net = estnu(&stnu).expect("DC");
-    let wait = net.waits().iter().find(|w| w.waiter == TimePoint(2));
-    assert_eq!(wait.map(|w| w.delay), Some(Ticks(8)));
 
-    for agent in [Agent::Asap, Agent::Latest, Agent::Random] {
-        for nature in [Nature::Min, Nature::Max, Nature::Random] {
-            let times = sim::run(&net, agent, nature, &mut Rng(11));
-            assert_satisfies(&stnu, &times);
+    for algorithm in DISPATCHERS {
+        let net = estnu_with(&stnu, algorithm).expect("DC");
+        let wait = net.waits().iter().find(|w| w.waiter == TimePoint(2));
+        assert_eq!(wait.map(|w| w.delay), Some(Ticks(8)), "{algorithm:?}");
+
+        for agent in [Agent::Asap, Agent::Latest, Agent::Random] {
+            for nature in [Nature::Min, Nature::Max, Nature::Random] {
+                let times = sim::run(&net, agent, nature, &mut Rng(11));
+                assert_satisfies(&stnu, &times);
+            }
         }
     }
 }
@@ -210,6 +225,37 @@ fn no_links_matches_stn() {
     assert!(estnu(&stnu).is_none());
 }
 
+/// `X1` and `X2` follow `C` (`Z => C` in `[1, 7]`) closely and must happen by `Z + 6`. The
+/// paper's diamond stand-in `X1 -> X2: 0` would let the minimisation drop `X2`'s deadline,
+/// which this dispatcher (no propagation along waits) then never learns.
+#[test]
+fn minimal_keeps_deadlines_behind_waits() {
+    let mut stnu = Stnu::new();
+    let z = stnu.add_time_point().unwrap();
+    let x1 = stnu.add_time_point().unwrap();
+    let x2 = stnu.add_time_point().unwrap();
+    let c = stnu.add_contingent_link(z, Ticks(1), Ticks(7)).unwrap();
+    stnu.add_constraint(x1, c, Some(Ticks(-1)), Some(Ticks(1)))
+        .unwrap();
+    stnu.add_constraint(x2, c, Some(Ticks(0)), Some(Ticks(1)))
+        .unwrap();
+
+    for x in [x1, x2] {
+        stnu.add_constraint(z, x, Some(Ticks(0)), Some(Ticks(6)))
+            .unwrap();
+    }
+
+    let net = estnu(&stnu).expect("DC");
+
+    for agent in [Agent::Asap, Agent::Latest, Agent::Random] {
+        for nature in [Nature::Min, Nature::Max, Nature::Random] {
+            for seed in 1..20 {
+                assert_satisfies(&stnu, &sim::run(&net, agent, nature, &mut Rng(seed)));
+            }
+        }
+    }
+}
+
 /// A chain `Z => C1 => C2`, each `[1, 2]`, with `C2 <= Z`: not DC. RUL⁻ needs its activation
 /// points normalised to executable ones to see this.
 #[test]
@@ -271,7 +317,8 @@ fn coverage(strategy: &impl Strategy<Value = StnuSpec>, samples: usize) -> (usiz
     for _ in 0..samples {
         let spec = strategy.new_tree(&mut runner).unwrap().current();
 
-        if let Some(net) = estnu(&spec.build()) {
+        // The closure keeps every wait, so it measures how often waits are needed at all.
+        if let Some(net) = estnu_with(&spec.build(), DispatchAlgorithm::Closure) {
             dc += 1;
             with_waits += usize::from(!net.waits().is_empty());
         }
@@ -294,6 +341,38 @@ fn generators_cover_verdicts_and_waits() {
     }
 }
 
+/// Total edges plus waits of every algorithm's network over the DC samples of `strategy`.
+fn sizes(strategy: &impl Strategy<Value = StnuSpec>, samples: usize) -> [usize; 3] {
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+
+    let mut runner = TestRunner::deterministic();
+    let mut total = [0; 3];
+
+    for _ in 0..samples {
+        let stnu = strategy.new_tree(&mut runner).unwrap().current().build();
+
+        for (i, algorithm) in DISPATCHERS.into_iter().enumerate() {
+            if let Some(net) = estnu_with(&stnu, algorithm) {
+                total[i] += net.edges().len() + net.waits().len();
+            }
+        }
+    }
+
+    total
+}
+
+/// The minimised network is smaller than Morris's, which is smaller than the closure's, in
+/// total over random networks (not necessarily for each one).
+#[test]
+fn minimisation_shrinks_networks() {
+    for strategy in [small_stnu().boxed(), medium_stnu().boxed()] {
+        let [minimal, morris, closure] = sizes(&strategy, 400);
+        println!("edges + waits: minimal {minimal}, Morris {morris}, closure {closure}");
+        assert!(minimal < morris && morris < closure);
+    }
+}
+
 /// Runs the dispatcher on `spec` under every policy pair.
 fn simulate_all(spec: &StnuSpec, net: &DispatchableNetwork, seed: u64) {
     let stnu = spec.build();
@@ -313,7 +392,10 @@ proptest! {
     fn checkers_match_oracle(spec in small_stnu()) {
         let expected = oracle::is_dc(&spec, Reaction::Instant);
         let stnu = spec.build();
-        prop_assert_eq!(estnu(&stnu).is_some(), expected, "closure");
+
+        for algorithm in DISPATCHERS {
+            prop_assert_eq!(estnu_with(&stnu, algorithm).is_some(), expected, "{:?}", algorithm);
+        }
 
         for algorithm in ALGORITHMS {
             prop_assert_eq!(is_dc(&stnu, algorithm), expected, "{:?}", algorithm);
@@ -325,14 +407,19 @@ proptest! {
     #[test]
     fn checkers_agree_on_larger_networks(spec in medium_stnu(), seed in 1u64..) {
         let stnu = spec.build();
-        let net = estnu(&stnu);
+        let expected = estnu_with(&stnu, DispatchAlgorithm::Closure).is_some();
 
         for algorithm in ALGORITHMS {
-            prop_assert_eq!(net.is_some(), is_dc(&stnu, algorithm), "{:?}", algorithm);
+            prop_assert_eq!(expected, is_dc(&stnu, algorithm), "{:?}", algorithm);
         }
 
-        if let Some(net) = net {
-            simulate_all(&spec, &net, seed);
+        for algorithm in DISPATCHERS {
+            let net = estnu_with(&stnu, algorithm);
+            prop_assert_eq!(net.is_some(), expected, "{:?}", algorithm);
+
+            if let Some(net) = net {
+                simulate_all(&spec, &net, seed);
+            }
         }
     }
 
@@ -347,8 +434,10 @@ proptest! {
     /// Dispatching a DC network never violates a constraint, whatever nature and the agent do.
     #[test]
     fn dispatch_never_violates(spec in small_stnu(), seed in 1u64..) {
-        if let Some(net) = estnu(&spec.build()) {
-            simulate_all(&spec, &net, seed);
+        for algorithm in DISPATCHERS {
+            if let Some(net) = estnu_with(&spec.build(), algorithm) {
+                simulate_all(&spec, &net, seed);
+            }
         }
     }
 
@@ -357,9 +446,11 @@ proptest! {
     fn budget_never_changes_verdict(spec in small_stnu(), max_steps in 0u64..5_000) {
         let stnu = spec.build();
         let budget = Budget { max_steps, max_cells: usize::MAX };
-        let limited = stnu.dispatchable(&budget);
-        prop_assert!(limited == Err(Error::BudgetExhausted)
-            || limited == stnu.dispatchable(&TEST_BUDGET));
+        for algorithm in DISPATCHERS {
+            let limited = stnu.dispatchable_with(algorithm, &budget);
+            prop_assert!(limited == Err(Error::BudgetExhausted)
+                || limited == stnu.dispatchable_with(algorithm, &TEST_BUDGET));
+        }
 
         for algorithm in ALGORITHMS {
             let limited = stnu.check_controllability_with(algorithm, &budget);

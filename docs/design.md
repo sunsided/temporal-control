@@ -111,11 +111,25 @@ that their window always equals the leader's (otherwise they could run first wit
 unconstrained window). Tests check that the filtered network has the same minimal network as
 the original, and that random, earliest and latest agents never fail.
 
-**STNU.** `Stnu::dispatchable` returns an *extended* network: every ordinary edge of the closed
-labelled graph plus every *wait* `(X, C, δ)`, an upper-case edge `X -> A_C` of weight `-δ` that is
-tighter than the parallel ordinary edge: `X` must not execute before `A_C + δ` unless `C` was
-observed. No filtering is applied (shortcut; a minimal dispatchable ESTNU in the style of
-Hunsberger and Posenato, **citation unverified**, is future work).
+**STNU.** `Stnu::dispatchable` returns an *extended* network: ordinary edges plus *waits*
+`(X, C, δ)`, upper-case edges `X -> A_C` of weight `-δ`: `X` must not execute before `A_C + δ`
+unless `C` was observed. `DispatchAlgorithm` picks the source:
+
+- `Morris2014`: Morris's dispatchable variant of his DC algorithm, which inserts every ordinary
+  edge and wait its backpropagation derives (one upper-case pass per link activated at a node,
+  then one ordinary pass; no normal form, as in CSTNU-Tool's `applyMorris2014Dispatchable`).
+  `O(n m + n^3)` for `k <= n`.
+- `Minimal` (default): `Morris2014` followed by `minDispESTNU` (Hunsberger and Posenato, ICAPS
+  2024): stand-in edges, STN dominated-edge filtering, removal of the remaining stand-ins and of
+  dominated waits. The paper's diamond stand-ins are left out: they are only entailed through
+  propagation along waits, which the paper's `RTE*` executor does and this dispatcher does not;
+  with them a deadline was lost (regression test). So the output is smaller than Morris's
+  (about 15-20 % fewer edges and waits on the random test networks, a quarter of the
+  closure's) but not proven minimal. `O(k n^3)`.
+- `Closure`: the all-pairs labelled closure (unbounded rounds), kept as the reference.
+
+All three are checked by simulating the dispatcher under every agent and nature policy against
+every requirement; for `Minimal` this is the only evidence of dispatchability.
 
 **Execution semantics (onboard, `Dispatcher<N, E>`).** Per time point: a window `[lb, ub]`, the
 number of unhappened heads of its *precedence* edges (edges of negative weight), and the time it
@@ -138,7 +152,8 @@ continues. The dispatcher never panics on any input; all tick arithmetic is chec
 | STN minimal network | Floyd-Warshall with early negative-diagonal stop | `O(n^3)` time, `n^2` cells | done |
 | STN minimal network, sparse | Johnson (BF potentials + Dijkstra per source) or P³C (Planken, de Weerdt and van der Krogt 2008) | `O(n m + n^2 log n)` | later, only if needed |
 | STN incremental consistency | keep the closed matrix; reject a constraint closing a negative cycle | `O(n^2)` per constraint, `n^2` cells | done |
-| STNU DC check + extended dispatchable network | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
+| Extended dispatchable STNU (default) | Morris 2014 dispatchable variant, then `minDispESTNU` without diamond stand-ins | `O(n m + k n^3)` | done |
+| Extended dispatchable STNU, reference | closure of the labelled graph in matrix form (`D` n×n, `W` n×k), rounds until fixpoint, all-max projection check | `O(n^3 + n^2 k)` per round, rounds bounded only by the budget (no proven bound) | done |
 | STNU DC check (default) | Morris 2014 backpropagation from negative nodes, one linear-scan Dijkstra per node on Morris's normal form (each link gets its own activation node and lower bound 0), as in CSTNU-Tool's `applyNormalForm` | `O(n m + n^3)`, i.e. `O(n^3)` for `m = O(n^2)`; proof in `stnu/morris.rs` | done |
 | STNU DC check, RUL⁻ | Cairo, Hunsberger and Rizzi 2018, with contingent activation points normalised to executable ones | `O(n m + k (m + k n) log n)` with a binary heap (paper: `O(mn + k^2 n + k n log n)`) | done; the AAAI 2022 speed-up (RUL2021) is open |
 | STNU DC check, cross-check | per-label backpropagation: Morris-style, one propagation per kind of negative in-edge, no normalisation | `O(n (k + 1) (m + n^2) log n)` | done |
@@ -265,10 +280,11 @@ structurally is still open.
 2. **STNU and DC**: contingent links, labelled-closure checker, Morris 2014 `O(n^3)` checker,
    RUL⁻, per-label backprop, SRN-cycle explanations, brute-force oracle (done). Open: RUL2021,
    CSTNU-Tool differential harness, fuzz targets.
-3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN, extended (unfiltered)
-   dispatchable STNU, `no_std`/no-`alloc` dispatcher with fixed capacity and input validation,
-   incremental STN consistency (done). Open: minimal dispatchable ESTNU, compact encoding with
-   checksum, Kani harnesses.
+3. **Dispatchable form and onboard dispatcher**: minimal dispatchable STN, bounded and reduced
+   dispatchable ESTNU (Morris 2014 dispatchable + `minDispESTNU` without diamonds),
+   `no_std`/no-`alloc` dispatcher with fixed capacity and input validation, incremental STN
+   consistency (done). Open: provably minimal ESTNU for this dispatcher (or an `RTE*`
+   dispatcher), compact encoding with checksum, Kani harnesses.
 4. **Simulation**: deterministic simulator with injected durations, resets and overruns.
 5. **Adapters**: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
 
@@ -293,10 +309,10 @@ structurally is still open.
   target executive can deliver an observation and act on it within one tick; otherwise a
   next-tick checker is needed. Also confirm which variant the CSTNU-Tool STNU checker uses
   before differential testing.
-- Whether the closure's missing round bound is acceptable on the ground. The verdict now has
-  proven bounds (Morris 2014, RUL⁻), but the dispatchable network still comes from the
-  closure; Morris's dispatchable variant (inserting the intermediate edges) or FD_STNU
-  (Hunsberger and Posenato 2023) would give a bounded one.
+- Minimal ESTNU: the default network is bounded and reduced, but its dispatchability rests on
+  Morris's theorem for the unreduced network plus simulation for the reduction. Either prove
+  the reduction for this dispatcher, or implement `RTE*` (propagation along waits) onboard and
+  enable the diamond stand-ins for a truly minimal network. Default: no diamonds.
 - Morris 2014 itself was not available. The implementation follows its description in
   Hunsberger and Posenato (2023, section 2.1.1) and CSTNU-Tool's `applyMorris2014`,
   `applyNormalForm` and `morris2014DCBackpropagation` (read, not copied); compare with the
@@ -305,8 +321,8 @@ structurally is still open.
   loops), so building one is metered and may exhaust a budget the verdict fits. Default:
   expand fully under the budget. Alternative: return the nested form (derived edges as
   references to sub-paths), or use the SRN-cycle finder of Hunsberger and Posenato (TIME 2024).
-- Whether the onboard network must be minimal (filtered ESTNU) to fit fixed capacities; today
-  an STNU's dispatchable network has up to `n^2` edges plus `n k` waits.
+- Whether the onboard network must be smaller still to fit fixed capacities; the default is
+  reduced, but its worst case is still `n^2` edges plus `n k` waits.
 - Dispatcher policy: `step` executes as soon as possible. Whether flight use needs other
   built-in policies (as late as possible, preferred times) or leaves that to the executive via
   `can_execute`/`execute`.
