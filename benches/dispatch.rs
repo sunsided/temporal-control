@@ -3,7 +3,7 @@
 
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::Criterion;
 use temporal_control::{
     Budget, DcAlgorithm, DispatchAlgorithm, DispatchableNetwork, Dispatcher, Stnu, Ticks, TimePoint,
 };
@@ -115,5 +115,12 @@ fn benches(c: &mut Criterion) {
     }
 }
 
-criterion_group!(group, benches);
-criterion_main!(group);
+/// Runs every benchmark in this file with criterion's command-line flags.
+///
+/// Written out instead of `criterion_main!`, whose generated functions carry no docs.
+fn main() {
+    let mut criterion = Criterion::default().configure_from_args();
+
+    benches(&mut criterion);
+    criterion.final_summary();
+}
