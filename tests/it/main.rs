@@ -11,3 +11,4 @@ mod properties;
 mod sim;
 mod stnu;
 mod stnu_gen;
+mod ticks;
