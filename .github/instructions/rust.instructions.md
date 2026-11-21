@@ -34,8 +34,7 @@ applyTo: "**/*.rs"
 - The DC checkers are cross-checked against each other, the closure and the brute-force
   oracle (`tests/it/`), and by the `dc_checkers` and `stn` fuzz targets. A new algorithm
   joins those cross-checks in the same PR.
-- Public API changes go with a matching update to the README "Scope and status" table and
-  `docs/design.md`. Sibling planning crates build against this one by path, so name every
-  public API change in the PR.
+- Public API changes go with a matching update to the README "Scope" list and
+  `docs/design.md`. Name every public API change in the PR.
 - Mermaid diagrams in doc comments must match the code they describe. Update them when the
   structure changes.

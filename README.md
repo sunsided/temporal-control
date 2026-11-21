@@ -8,37 +8,33 @@
 [![License](https://img.shields.io/crates/l/temporal-control)](https://github.com/sunsided/temporal-control#license)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-Simple temporal networks with uncertainty: dynamic controllability checking and dispatchable execution for no_std targets.
+Simple temporal networks with uncertainty: dynamic controllability checking on the ground and
+dispatchable execution onboard, down to `no_std` targets without a heap.
 
-## Scope and status
+A simple temporal network (STN) is a set of time points with "at least `a`, at most `b` ticks
+apart" constraints between them; an STNU adds contingent links, durations that nature picks
+within known bounds (an activity whose end the system only observes). The
+crate decides whether such a network can always be executed, whatever the contingent durations
+turn out to be, and if so compiles it into a dispatchable form that a small fixed-capacity
+dispatcher executes tick by tick. When a network is not controllable, the answer names the
+requirements and contingent bounds that conflict. All time values are integer ticks, all
+arithmetic is checked, and every algorithm runs under an explicit compute and memory budget, so
+an exhausted budget yields an error rather than a verdict.
 
-Pre-release (0.0.0); the API will change. See [docs/design.md](https://github.com/sunsided/temporal-control/blob/main/docs/design.md).
+## Who this is for
 
-| Feature | Status |
-| --- | --- |
-| STN consistency (Bellman-Ford) with negative-cycle explanation | done |
-| STN minimal network (Floyd-Warshall) | done |
-| STN minimal constraints of the constrained pairs only (P³C, Planken, de Weerdt and van der Krogt 2008) | done |
-| Incremental STN consistency, `O(n^2)` per constraint | done |
-| Dispatchable STN by dominated-edge filtering (Muscettola, Morris and Tsamardinos 1998, as restated by Morris 2014; minimal except for edge copies on simultaneous points, if that restatement is complete) | done |
-| Extended dispatchable STNU: Morris 2014 dispatchable variant, reduced by `minDispESTNU` (without diamonds) | done |
-| STNU dynamic controllability: labelled closure with extended dispatchable network (reference) | done |
-| STNU dynamic controllability: Morris 2014 `O(n^3)` backpropagation (default checker) | done |
-| STNU dynamic controllability: RUL⁻ (Cairo, Hunsberger and Rizzi 2018) | done |
-| STNU dynamic controllability: RUL2021 (Hunsberger and Posenato 2022) | done |
-| STNU dynamic controllability: per-label backpropagation (cross-check) | done |
-| Explanations of non-controllability (semi-reducible negative cycles) | done |
-| Onboard dispatcher, `no_std` without `alloc`, fixed capacity, loaded in place from a `const EMPTY` | done |
-| `u16`/`u32`/`usize` index types for the dispatcher's internal handles | done |
-| Compact checksummed encoding (CRC-32) of dispatchable networks, no-`alloc` decoder | done |
-| `cargo fuzz` targets: decoder, dispatcher calls, DC checker agreement, STN algorithm agreement | done |
-| Kani harnesses for the dispatcher and the decoder | done: all verify at small bounds (design section 8) |
-| Algorithms compared with their papers; the papers' examples as tests (design section 12) | done |
-| Differential tests against CSTNU-Tool | planned |
-
-Reaction-time semantics: an observation at tick `t` may trigger executions at the same tick.
-Next-tick reaction is supported by transforming the network (`Stnu::with_reaction`).
-Every algorithm takes an explicit compute and memory budget.
+- Flight software and robotics engineers who schedule activities with uncertain durations on a
+  spacecraft, rover or robot and need the timing checked before uplink and executed onboard
+  without a heap. The design targets adoption by an existing executive such as F Prime or cFS.
+- Planners that emit temporal plans and need to know whether the plan stays executable under
+  duration uncertainty, with an explanation when it does not.
+- Researchers comparing dynamic controllability algorithms: Morris 2014, RUL⁻, RUL2021, the
+  labelled closure and a per-label backpropagation run on the same networks and are
+  cross-checked against each other and a brute-force oracle.
+- For energy, memory, thermal or communication budgets over the same timeline,
+  [resource-timeline](https://github.com/sunsided/resource-timeline) is the companion crate;
+  for durations with probabilities rather than bounds,
+  [stochastic-search](https://github.com/sunsided/stochastic-search) is the better fit.
 
 ## Installation
 
@@ -50,10 +46,42 @@ For a target without a heap, keep only the onboard dispatcher and decoder:
 
 ```toml
 [dependencies]
-temporal-control = { version = "0.0.0", default-features = false }
+temporal-control = { version = "0.1", default-features = false }
 ```
 
-## Features
+## Scope
+
+- STN consistency (Bellman-Ford) with negative-cycle explanation.
+- STN minimal network (Floyd-Warshall).
+- STN minimal constraints of the constrained pairs only (P³C, Planken, de Weerdt and van der
+  Krogt 2008).
+- Incremental STN consistency, `O(n^2)` per constraint.
+- Dispatchable STN by dominated-edge filtering (Muscettola, Morris and Tsamardinos 1998, as
+  restated by Morris 2014; minimal except for edge copies on simultaneous points, if that
+  restatement is complete).
+- Extended dispatchable STNU: Morris 2014 dispatchable variant, reduced by `minDispESTNU`
+  (without diamonds).
+- STNU dynamic controllability: labelled closure with extended dispatchable network
+  (reference), Morris 2014 `O(n^3)` backpropagation (default checker), RUL⁻ (Cairo, Hunsberger
+  and Rizzi 2018), RUL2021 (Hunsberger and Posenato 2022), and per-label backpropagation
+  (cross-check).
+- Explanations of non-controllability (semi-reducible negative cycles).
+- Onboard dispatcher, `no_std` without `alloc`, fixed capacity, loaded in place from a
+  `const EMPTY`, with `u16`/`u32`/`usize` index types for its internal handles.
+- Compact checksummed encoding (CRC-32) of dispatchable networks, with a no-`alloc` decoder.
+- `cargo fuzz` targets (decoder, dispatcher calls, DC checker agreement, STN algorithm
+  agreement) and Kani harnesses for the dispatcher and the decoder, all verified at small
+  bounds (see section 8 of
+  [docs/design.md](https://github.com/sunsided/temporal-control/blob/main/docs/design.md)).
+- The papers' own examples as tests, and every algorithm compared with its paper (section 12
+  of the design).
+
+Reaction-time semantics: an observation at tick `t` may trigger executions at the same tick.
+Next-tick reaction is supported by transforming the network (`Stnu::with_reaction`).
+
+Not yet implemented: differential tests against CSTNU-Tool.
+
+## Cargo features
 
 | Feature | Default | Enables |
 | --- | --- | --- |

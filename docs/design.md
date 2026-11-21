@@ -1,7 +1,5 @@
 # temporal-control: design
 
-Status: draft for milestone 1. Sections marked *planned* describe intent, not code.
-
 ## 1. Purpose and boundaries
 
 `temporal-control` is a narrow, verifiable component: it decides whether a set of timing
@@ -376,15 +374,15 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
 | Example tests | Hand-written networks with known answers (rover example) | done |
 | Paper examples | The papers' own examples with their stated answers (`tests/it/papers.rs`): DMP 1991 Table 1, MMV 2001 Fig. 2, Hunsberger 2009 Figs. 1 and 2, the Morris 2014 section 4 cycle | done |
 | Property tests (proptest) | BF, FW and P³C agree (P³C on every pair it computes); schedules satisfy all constraints; cycles chain, close and are negative when recomputed from the STN's own constraints; minimal network is sound and tight; budgets never change a verdict; extreme `i64` values give a verdict or `Overflow` but never panic; generator yields both verdicts > 20 % | done |
-| Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | milestone 2 |
+| Differential (ground) | DC verdicts against CSTNU-Tool on its STNU benchmarks (`STNUBenchmark2020`, tied to Hunsberger and Posenato AAAI 2022) and on random STNUs; import CSTNU-Tool's file format (GraphML is assumed, **unverified**) in a dev-only tool | open |
 | Brute-force oracle | Integer-time execution game solved exhaustively (both move orders) on STNUs with up to 3 executable points and 2 links; every checker and dispatchable-network algorithm must match the same-tick game, and on the next-tick transformation the next-tick game; next-tick DC implies same-tick DC; mutations (run by hand, recorded in the commit messages) must make it fail: closure rules and unsuitability; Morris unsuitability, recursion, lower-case edges, derived edges, stop at non-negative distance, normalisation; RUL⁻ non-length-preserving Upper⁻, blocker check, Lower⁻, the `u - l` bound, seeding with the own lower-case edge, normalisation | done |
 | Differential (internal) | Incremental STN vs from-scratch Floyd-Warshall after every constraint; every STNU checker vs the closure on STNUs up to 7 executable points and 4 links; STNU without links vs STN; filtered STN vs its minimal network | done |
 | Explanations | Every SRN cycle chains, closes with its stated negative weight, and its requirement bounds alone are not DC (oracle on small, closure on medium networks) | done |
-| Simulated dispatch | DC networks (and dispatchable STNs) under ASAP, latest and random agents and min, max and random nature: no dispatcher error, every requirement and contingent bound holds | done; resets and overruns: milestone 4 |
+| Simulated dispatch | DC networks (and dispatchable STNs) under ASAP, latest and random agents and min, max and random nature: no dispatcher error, every requirement and contingent bound holds | done; resets and overruns: open |
 | Encoding | Round trips of dispatchable STNs and ESTNUs (decode equals the original, re-encoding is byte-identical, simulated dispatch from decoded `usize` and `u16` dispatchers matches the original run); every single-bit flip and every truncation of a sample encoding is rejected and leaves a busy dispatcher unchanged; each `DecodeError`; random bytes and random records behind a valid header and CRC never panic | done |
 | Fuzzing | Standalone `fuzz/` crate (not a workspace member): `decode` (raw bytes and framed random records; onboard and ground decoders agree), `dispatch` (arbitrary networks and call sequences, `usize` and `u16` dispatchers agree, rejected loads change nothing), `dc_checkers` (STNUs up to 8 points: all checkers and the closure agree, DC networks load and round-trip), `stn` (STNs up to 8 points with extreme bounds: Bellman-Ford schedules hold, Floyd-Warshall, P³C and the dispatchable filter agree with Bellman-Ford, P³C bounds equal the minimal network's, the incremental STN accepts exactly the consistent constraints and matches the minimal network after every step). Run with `cargo +nightly fuzz run <target> -- -max_total_time=60` or `task fuzz:smoke`; 60 s each found nothing. CI builds and lints the targets | done; fuzzing runs in CI open |
 | Model checking | Kani harnesses for the dispatcher calls and the decoder on small fixed capacities: no panic, no overflow, windows respected | done: 11 harnesses verified under Kani 0.68, each under 12 GB (bounds and results below); also run on concrete inputs in unit tests |
-| Simulation | deterministic replay with injected contingent durations and resets: DC network plus dispatcher never violates a requirement constraint | milestone 4 |
+| Simulation | deterministic replay with injected contingent durations and resets: DC network plus dispatcher never violates a requirement constraint | open |
 
 **Kani harnesses.** `src/dispatch/proofs.rs` holds bounded no-panic checks as ordinary
 functions; unit tests run them on 20,000 pseudo-random concrete inputs each (with up to three
@@ -438,25 +436,13 @@ systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0 \
 Do not run `cargo kani --lib` without `--harness` and without a cap: it verifies every
 harness in one process.
 
-## 9. Milestones
+## 9. Not yet implemented
 
-1. **STN** (done on `draft/initial`): construction, BF consistency with witness or negative
-   cycle, FW minimal network, P³C minimal constraints of the constrained pairs, budgets,
-   property tests, `thumbv7em-none-eabihf` build. All STN and DC algorithms compared with
-   their papers (section 12).
-2. **STNU and DC**: contingent links, labelled-closure checker, Morris 2014 `O(n^3)` checker,
-   RUL⁻, RUL2021, per-label backprop, SRN-cycle explanations (compact), next-tick reaction by
-   transformation, brute-force oracle, fuzz target cross-checking every checker (done). Open:
-   CSTNU-Tool differential harness.
-3. **Dispatchable form and onboard dispatcher**: filtered dispatchable STN, bounded and reduced
-   dispatchable ESTNU (Morris 2014 dispatchable + `minDispESTNU` without diamonds),
-   `no_std`/no-`alloc` dispatcher with fixed capacity and input validation, incremental STN
-   consistency, in-place loading from a `const EMPTY`, `u16`/`u32` index types, compact
-   checksummed encoding with a no-`alloc` decoder, fuzz targets, Kani harnesses (done, all
-   verified at small bounds). Open: provably minimal ESTNU for this
-   dispatcher (or an `RTE*` dispatcher), running Kani in CI.
-4. **Simulation**: deterministic simulator with injected durations, resets and overruns.
-5. **Adapters**: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
+- A CSTNU-Tool differential harness for the DC checkers.
+- A provably minimal ESTNU for this dispatcher (or an `RTE*` dispatcher), and running Kani in
+  CI.
+- A deterministic simulator with injected durations, resets and overruns.
+- Adapters: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
 
 ## 10. Cross-crate needs
 

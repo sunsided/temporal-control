@@ -1,6 +1,6 @@
 [package]
 name = "temporal-control"
-description = "Simple temporal networks with uncertainty: dynamic controllability checking and dispatchable execution for no_std targets"
+description = "Simple temporal networks with uncertainty: dynamic controllability checking, dispatchable networks and a no_std, no-alloc onboard dispatcher"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.85"
@@ -8,8 +8,8 @@ authors = ["Markus Mayer <widemeadows@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/temporal-control"
 readme = "README.md"
-keywords = ["stnu", "scheduling", "temporal", "spacecraft", "planning"]
-categories = ["aerospace", "algorithms", "no-std"]
+keywords = ["stnu", "temporal-network", "scheduling", "controllability", "spacecraft"]
+categories = ["aerospace", "algorithms", "embedded", "no-std", "no-std::no-alloc"]
 # Repository tooling stays out of the published crate.
 exclude = [
     ".github/",
