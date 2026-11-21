@@ -11,9 +11,10 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   commands.
 - Every `uses:` is pinned to a full 40-character commit SHA, with a `# vX.Y.Z` comment. Reject
   tag or branch refs.
-- `dtolnay/rust-toolchain` is pinned to a `master` commit (`# master`) and always gets an
-  explicit `toolchain:` input. Its `stable`/`nightly` branches are not tags, and Dependabot
-  cannot follow them: it re-pinned the `nightly` use to the `stable` commit.
+- `dtolnay/rust-toolchain` is pinned to the commit of its `stable` or `nightly` branch
+  (`# stable`, `# nightly`) and always gets an explicit `toolchain:` input that matches the
+  comment. Those branches are not tags, so check Dependabot bumps of this action: a `nightly`
+  use must not be re-pinned to the `stable` commit.
 - The workflow sets `permissions: {}` at the top, and each job sets the least privilege it
   needs. Every `actions/checkout` sets `persist-credentials: false`.
 - No `pull_request_target`. No `${{ github.event.* }}` or other untrusted expressions
