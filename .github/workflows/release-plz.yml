@@ -13,7 +13,7 @@ permissions: {}
 jobs:
   release-plz-release:
     name: Release-plz release
-    if: github.repository_owner == 'sunsided'
+    if: github.repository_owner == 'sunsided' && vars.RELEASE_APP_CLIENT_ID != ''
     runs-on: ubuntu-latest
     # No concurrency group here: cancelling a pending run could skip a release.
     permissions:
@@ -41,7 +41,7 @@ jobs:
 
   release-plz-pr:
     name: Release-plz PR
-    if: github.repository_owner == 'sunsided'
+    if: github.repository_owner == 'sunsided' && vars.RELEASE_APP_CLIENT_ID != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
