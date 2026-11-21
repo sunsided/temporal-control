@@ -34,8 +34,9 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   add `--all-targets` back.
 - `fuzz/` is a separate nightly workspace. Its tasks live in `fuzz/Taskfile.dist.yaml`,
   included as `fuzz:`; CI's `fuzz` job mirrors `task fuzz:build` and `task fuzz:lint`.
-- `Cargo.lock` is tracked (root and `fuzz/`), and Dependabot updates both. CI steps do not
-  use `--locked`, so a stale lock file still builds.
+- `Cargo.lock` is tracked (root and `fuzz/`), and Dependabot updates both. `ci.yml` steps do
+  not use `--locked`; `publish-crates-io.yml` does, so a release builds exactly the locked
+  dependencies.
 - `scripts/check-branch.sh` is the single definition of allowed branch names. It is used by
   the Taskfile, the hook and the CI `branch` job.
 - New jobs that should gate merges must also be added to branch protection. Mention that in
