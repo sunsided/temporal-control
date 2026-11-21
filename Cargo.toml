@@ -31,6 +31,10 @@ harness = false
 name = "stn"
 harness = false
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--html-in-header", "docs/mermaid.html"]
+
 [lints.rust]
 missing_docs = "warn"
 unsafe_code = "forbid"
