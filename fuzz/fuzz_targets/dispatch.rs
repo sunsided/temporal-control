@@ -156,25 +156,10 @@ fn run<I: Index>(d: &mut Dispatcher<N, E, I>, net: &Network, call: Call, modulus
     let outcome = match call {
         Call::Observe(p, t) => format!("{:?}", d.observe(tp(p), t.ticks())),
         Call::Execute(p, t) => execute(d, tp(p), t.ticks()),
-        Call::Step(p, t) => {
-            let observed: Vec<TimePoint> = p.map(tp).into_iter().collect();
-            let mut out = [TimePoint(0); N];
-            let r = d.step(t.ticks(), &observed, &mut out);
-            let k = r.unwrap_or(0);
-            format!("{r:?} {:?}", &out[..k])
-        }
+        Call::Step(p, t) => step(d, p.map(tp), t.ticks()),
         Call::Deadlines(t) => format!("{:?}", d.check_deadlines(t.ticks())),
         Call::Reload => format!("{}", net.load(d)),
-        Call::RejectedLoad => {
-            let before = format!("{d:?}");
-            assert!(d.load(&[PointKind::Executable; N + 1], &[], &[]).is_err());
-            assert_eq!(
-                format!("{d:?}"),
-                before,
-                "rejected load changed the dispatcher"
-            );
-            String::new()
-        }
+        Call::RejectedLoad => rejected_load(d),
     };
     let probe = (0..modulus)
         .map(|p| (d.time(TimePoint(p)), d.window(TimePoint(p))))
@@ -185,6 +170,29 @@ fn run<I: Index>(d: &mut Dispatcher<N, E, I>, net: &Network, call: Call, modulus
         d.next_wakeup(),
         d.is_complete()
     )
+}
+
+/// `step` with at most one observation; the summary lists the points it executed.
+fn step<I: Index>(d: &mut Dispatcher<N, E, I>, observed: Option<TimePoint>, now: Ticks) -> String {
+    let observed: Vec<TimePoint> = observed.into_iter().collect();
+    let mut out = [TimePoint(0); N];
+    let result = d.step(now, &observed, &mut out);
+    let executed = result.unwrap_or(0);
+
+    format!("{result:?} {:?}", &out[..executed])
+}
+
+/// A load that must fail (one point too many) and must leave `d` unchanged.
+fn rejected_load<I: Index>(d: &mut Dispatcher<N, E, I>) -> String {
+    let before = format!("{d:?}");
+    assert!(d.load(&[PointKind::Executable; N + 1], &[], &[]).is_err());
+    assert_eq!(
+        format!("{d:?}"),
+        before,
+        "rejected load changed the dispatcher"
+    );
+
+    String::new()
 }
 
 /// `execute`, checking that success means `can_execute` held and the time was recorded.

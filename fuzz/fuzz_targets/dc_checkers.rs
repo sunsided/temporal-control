@@ -81,7 +81,7 @@ fuzz_target!(|ops: Vec<Op>| {
     for algorithm in ALGORITHMS {
         let verdict = stnu.check_controllability_with(algorithm, &BUDGET);
 
-        if let Some(dc) = answer(&verdict.map(|c| matches!(c, Controllability::Controllable(())))) {
+        if let Some(dc) = answer(verdict.map(|c| matches!(c, Controllability::Controllable(())))) {
             verdicts.push((format!("{algorithm:?}"), dc));
         }
     }
@@ -93,7 +93,7 @@ fuzz_target!(|ops: Vec<Op>| {
             check_network(net);
         }
 
-        if let Some(dc) = answer(&result.map(|c| matches!(c, Controllability::Controllable(_)))) {
+        if let Some(dc) = answer(result.map(|c| matches!(c, Controllability::Controllable(_)))) {
             verdicts.push((format!("{algorithm:?}"), dc));
         }
     }
@@ -139,9 +139,9 @@ fn build(ops: &[Op]) -> Option<Stnu> {
 
 /// The verdict if the checker answered, `None` on budget exhaustion; panics on
 /// `Error::Internal` and on errors a small STNU must not produce.
-fn answer(result: &Result<bool, Error>) -> Option<bool> {
+fn answer(result: Result<bool, Error>) -> Option<bool> {
     match result {
-        Ok(dc) => Some(*dc),
+        Ok(dc) => Some(dc),
         Err(Error::BudgetExhausted | Error::MemoryBudgetExceeded) => None,
         Err(e) => panic!("checker failed: {e:?}"),
     }
