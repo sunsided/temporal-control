@@ -188,7 +188,7 @@ jobs:
       # Library only: dev-dependencies (criterion 0.8 needs 1.86) may need a newer Rust than users do.
       - run: cargo hack check --rust-version --workspace --ignore-private --all-features
 
-  # Baseline: the published 0.0.0 placeholder on crates.io.
+  # Baseline: the latest release on crates.io.
   semver:
     name: semver
     if: github.event_name == 'pull_request'
