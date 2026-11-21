@@ -49,6 +49,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "stn"
+path = "fuzz_targets/stn.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "dc_checkers"
 path = "fuzz_targets/dc_checkers.rs"
 test = false

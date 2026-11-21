@@ -23,7 +23,7 @@ Pre-release (0.0.0) on `draft/initial`; the API will change. See [docs/design.md
 | Onboard dispatcher, `no_std` without `alloc`, fixed capacity, loaded in place from a `const EMPTY` | done |
 | `u16`/`u32`/`usize` index types for the dispatcher's internal handles | done |
 | Compact checksummed encoding (CRC-32) of dispatchable networks, no-`alloc` decoder | done |
-| `cargo fuzz` targets: decoder, dispatcher calls, DC checker agreement | done |
+| `cargo fuzz` targets: decoder, dispatcher calls, DC checker agreement, STN algorithm agreement | done |
 | Kani harnesses for the dispatcher and the decoder | done: all verify at small bounds (design section 8) |
 | Algorithms compared with their papers; the papers' examples as tests (design section 12) | done |
 | Differential tests against CSTNU-Tool | planned |
