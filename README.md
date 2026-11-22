@@ -21,6 +21,8 @@ requirements and contingent bounds that conflict. All time values are integer ti
 arithmetic is checked, and every algorithm runs under an explicit compute and memory budget, so
 an exhausted budget yields an error rather than a verdict.
 
+Part of the [planning and search crates](https://sunsided.github.io/planning-and-search/); see also this crate's [overview page](https://sunsided.github.io/planning-and-search/crates/temporal-control/).
+
 ## Who this is for
 
 - Flight software and robotics engineers who schedule activities with uncertain durations on a
