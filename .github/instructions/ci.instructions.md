@@ -39,5 +39,10 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   crates.io, and no step uses `--locked`.
 - `scripts/check-branch.sh` is the single definition of allowed branch names. It is used by
   the Taskfile, the hook and the CI `branch` job.
+- `dependencies` in `ci.yml` (dependency submission) runs only on pushes to `main`: it builds
+  an SPDX SBOM with `cargo-sbom` and submits it to the dependency graph. It is CI-only and not a
+  required check.
+- `zizmor-sarif` in `actions-lint.yml` (zizmor (code scanning)) runs only on pushes to `main` and
+  uploads findings as SARIF to the Security tab without failing. The blocking `zizmor` job stays.
 - New jobs that should gate merges must also be added to branch protection. Mention that in
   the PR.
