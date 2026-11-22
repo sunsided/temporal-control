@@ -7,6 +7,7 @@ rust-version = "1.85"
 authors = ["Markus Mayer <widemeadows@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/temporal-control"
+homepage = "https://sunsided.github.io/planning-and-search/crates/temporal-control/"
 readme = "README.md"
 keywords = ["stnu", "temporal-network", "scheduling", "controllability", "spacecraft"]
 categories = ["aerospace", "algorithms", "embedded", "no-std", "no-std::no-alloc"]
