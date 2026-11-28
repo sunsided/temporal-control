@@ -185,7 +185,7 @@ jobs:
       - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
         with:
           tool: cargo-hack
-      # Library only: dev-dependencies (criterion 0.8 needs 1.86) may need a newer Rust than users do.
+      # Library only: dev-dependencies (proptest 1.12 needs 1.88) may need a newer Rust than users do.
       - run: cargo hack check --rust-version --workspace --ignore-private --all-features
 
   # Baseline: the latest release on crates.io.

@@ -23,12 +23,21 @@ pub enum Error {
     OutOfMemory,
     /// Two independent checks disagreed, or an internal invariant broke. This is a bug.
     Internal,
+    // New variants go last: reordering changes the discriminants (a semver break).
+    /// An agent does not belong to this multi-agent network.
+    UnknownAgent,
+    /// The summaries handed to a group operation do not form one complete, current set: an
+    /// agent is missing or duplicated, the groups or revisions disagree, or a shared
+    /// constraint refers to a point its owner did not report.
+    MismatchedSummaries,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
             Self::UnknownTimePoint => "time point does not belong to this network",
+            Self::UnknownAgent => "agent does not belong to this network",
+            Self::MismatchedSummaries => "summaries do not form one complete, current set",
             Self::InvalidContingentLink => "contingent link bounds must satisfy 0 < lo <= hi",
             Self::Overflow => "tick arithmetic overflowed",
             Self::BudgetExhausted => "step budget exhausted",

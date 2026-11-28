@@ -28,6 +28,9 @@ Part of the [planning and search crates](https://sunsided.github.io/planning-and
 - Flight software and robotics engineers who schedule activities with uncertain durations on a
   spacecraft, rover or robot and need the timing checked before uplink and executed onboard
   without a heap. The design targets adoption by an existing executive such as F Prime or cFS.
+- Teams of vehicles (rovers, landers, orbiters) that share one plan but rarely talk: each
+  gets a part it can execute and change alone, and the parts are merged and rebalanced when
+  they can communicate, without a central solver.
 - Planners that emit temporal plans and need to know whether the plan stays executable under
   duration uncertainty, with an explanation when it does not.
 - Researchers comparing dynamic controllability algorithms: Morris 2014, RUL⁻, RUL2021, the
@@ -68,6 +71,11 @@ temporal-control = { version = "0.1", default-features = false }
   and Rizzi 2018), RUL2021 (Hunsberger and Posenato 2022), and per-label backpropagation
   (cross-check).
 - Explanations of non-controllability (semi-reducible negative cycles).
+- Multi-agent STNs: temporal decoupling into per-agent local networks that execute
+  independently (greedy cuts relative to a shared reference point), local changes checked
+  by the agent alone, distributed consistency checks and re-decoupling from exchanged
+  summaries of each agent's shared points, and communication windows (relay passes) modelled
+  as contingent links.
 - Onboard dispatcher, `no_std` without `alloc`, fixed capacity, loaded in place from a
   `const EMPTY`, with `u16`/`u32`/`usize` index types for its internal handles.
 - Compact checksummed encoding (CRC-32) of dispatchable networks, with a no-`alloc` decoder.
@@ -81,7 +89,29 @@ temporal-control = { version = "0.1", default-features = false }
 Reaction-time semantics: an observation at tick `t` may trigger executions at the same tick.
 Next-tick reaction is supported by transforming the network (`Stnu::with_reaction`).
 
-Not yet implemented: differential tests against CSTNU-Tool.
+Not yet implemented: differential tests against CSTNU-Tool, and optimal (flexibility-maximising)
+decoupling.
+
+## Examples
+
+Each example asserts its own results and runs as a test (`cargo test --examples`).
+
+- [`rover_relay`](https://github.com/sunsided/temporal-control/blob/main/examples/rover_relay.rs):
+  two rovers and an orbiter decouple a joint plan, execute it without talking, absorb a delay
+  locally, rebalance the slack at the next contact when a delay does not fit, and reject a
+  conflicting change with the shared constraint it breaks.
+- [`relay_pass`](https://github.com/sunsided/temporal-control/blob/main/examples/relay_pass.rs):
+  a lander downlinks through a relay pass whose opening is uncertain. Dynamic
+  controllability, the explanation of a deadline that cannot hold, the checksummed uplink and
+  the heap-free dispatcher reacting to the actual analysis end and pass opening.
+- [`observation_campaign`](https://github.com/sunsided/temporal-control/blob/main/examples/observation_campaign.rs):
+  a telescope night planned request by request with the incremental STN (a rejected request
+  names the constraints it conflicts with), a 200-field survey checked with P³C instead of
+  the full matrix, and the dispatchable network of the night.
+
+```sh
+cargo run --example rover_relay
+```
 
 ## Cargo features
 

@@ -31,7 +31,7 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   under a 12 GB cap (`docs/design.md`, section 8). Reject a CI job or task that runs
   `cargo kani` without `--harness`.
 - `msrv` checks the library only (`cargo hack check --rust-version --all-features`, no
-  `--all-targets`): dev-dependencies may need a newer Rust (criterion 0.8 needs 1.86). Do not
+  `--all-targets`): dev-dependencies may need a newer Rust (proptest 1.12 needs 1.88). Do not
   add `--all-targets` back.
 - `fuzz/` is a separate nightly workspace. Its tasks live in `fuzz/Taskfile.dist.yaml`,
   included as `fuzz:`; CI's `fuzz` job mirrors `task fuzz:build` and `task fuzz:lint`.
