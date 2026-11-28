@@ -267,11 +267,12 @@ impl AgentGroup {
     ///
     /// # Errors
     ///
-    /// As for [`Stn::check_consistency`].
+    /// As for [`Stn::check_consistency`], and [`Error::Internal`] if a cycle edge has no
+    /// recorded origin (a bug).
     pub fn check_consistency(&self, budget: &Budget) -> Result<GroupVerdict, Error> {
         Ok(match self.stn.check_consistency(budget)? {
             Verdict::Consistent(_) => GroupVerdict::Consistent,
-            Verdict::Inconsistent(cycle) => GroupVerdict::Inconsistent(self.conflict(&cycle)),
+            Verdict::Inconsistent(cycle) => GroupVerdict::Inconsistent(self.conflict(&cycle)?),
         })
     }
 
@@ -291,7 +292,12 @@ impl AgentGroup {
     }
 
     /// Names the shared constraints and agents behind a negative cycle of [`Self::stn`].
-    pub(super) fn conflict(&self, cycle: &NegativeCycle) -> GroupConflict {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Internal`] if a cycle edge names a constraint without a recorded origin (a
+    /// bug: every constraint of [`Self::stn`] gets one).
+    pub(super) fn conflict(&self, cycle: &NegativeCycle) -> Result<GroupConflict, Error> {
         let mut shared = Vec::new();
         let mut agents = Vec::new();
 
@@ -299,7 +305,7 @@ impl AgentGroup {
             match self.origins.get(edge.constraint.0) {
                 Some(&Origin::Shared(id)) => shared.push(id),
                 Some(&Origin::Summary(agent)) => agents.push(agent),
-                None => {}
+                None => return Err(Error::Internal),
             }
         }
 
@@ -307,7 +313,7 @@ impl AgentGroup {
         shared.dedup();
         agents.sort_unstable();
         agents.dedup();
-        GroupConflict { shared, agents }
+        Ok(GroupConflict { shared, agents })
     }
 
     /// Fills the joint network: the points, every summary bound, then every shared constraint.

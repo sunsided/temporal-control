@@ -425,9 +425,10 @@ impl Agent {
         let new_cuts = match cuts::choose(group.stn(), group.shared(), budget)? {
             Verdict::Consistent(cuts) => cuts,
             Verdict::Inconsistent(cycle) => {
+                let conflict = group.conflict(&cycle)?;
                 self.pending.clear();
                 self.revision = self.revision.saturating_add(1);
-                return Ok(GroupVerdict::Inconsistent(group.conflict(&cycle)));
+                return Ok(GroupVerdict::Inconsistent(conflict));
             }
         };
 
