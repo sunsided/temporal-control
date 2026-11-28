@@ -11,12 +11,6 @@ use core::fmt;
 pub enum Error {
     /// A time point does not belong to this network.
     UnknownTimePoint,
-    /// An agent does not belong to this multi-agent network.
-    UnknownAgent,
-    /// The summaries handed to a group operation do not form one complete, current set: an
-    /// agent is missing or duplicated, the groups or revisions disagree, or a shared
-    /// constraint refers to a point its owner did not report.
-    MismatchedSummaries,
     /// A contingent link needs `0 < lo <= hi`.
     InvalidContingentLink,
     /// A checked arithmetic operation on [`Ticks`](crate::Ticks) or a size overflowed.
@@ -29,6 +23,13 @@ pub enum Error {
     OutOfMemory,
     /// Two independent checks disagreed, or an internal invariant broke. This is a bug.
     Internal,
+    // New variants go last: reordering changes the discriminants (a semver break).
+    /// An agent does not belong to this multi-agent network.
+    UnknownAgent,
+    /// The summaries handed to a group operation do not form one complete, current set: an
+    /// agent is missing or duplicated, the groups or revisions disagree, or a shared
+    /// constraint refers to a point its owner did not report.
+    MismatchedSummaries,
 }
 
 impl fmt::Display for Error {
