@@ -8,6 +8,7 @@ use temporal_control::{
 };
 
 use crate::generators::ConstraintSpec;
+use crate::sim::Rng;
 
 /// A multi-agent plan as plain data. Point `0` is the reference; point `i > 0` belongs to
 /// agent `owners[i - 1]`.
@@ -132,20 +133,14 @@ fn policies() -> impl Strategy<Value = Vec<Policy>> {
 }
 
 /// Picks a value in `[lo, hi]`; infinite ends are taken 30 ticks beyond the other end.
-fn pick(lo: Option<Ticks>, hi: Option<Ticks>, policy: Policy, state: &mut u64) -> Ticks {
+fn pick(lo: Option<Ticks>, hi: Option<Ticks>, policy: Policy, rng: &mut Rng) -> Ticks {
     let lo = lo.map_or_else(|| hi.map_or(-30, |h| h.0 - 30), |l| l.0);
     let hi = hi.map_or(lo + 30, |h| h.0);
 
     Ticks(match policy {
         Policy::Earliest => lo,
         Policy::Latest => hi,
-        Policy::Random(_) => {
-            *state = state
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
-            let span = u64::try_from(hi - lo).unwrap() + 1;
-            lo + i64::try_from((*state >> 33) % span).unwrap()
-        }
+        Policy::Random(_) => rng.range(lo, hi),
     })
 }
 
@@ -155,10 +150,11 @@ fn local_schedule(agent: &Agent, policy: Policy) -> Vec<(TimePoint, Ticks)> {
     let budget = Budget::UNLIMITED;
     let local = agent.local_network().unwrap();
     let mut inc = IncrementalStn::new();
-    let mut state = match policy {
-        Policy::Random(seed) => seed,
-        _ => 0,
-    };
+    // xorshift never leaves zero, so the low bit is forced on.
+    let mut rng = Rng(match policy {
+        Policy::Random(seed) => seed | 1,
+        _ => 1,
+    });
 
     for _ in 0..local.time_point_count() {
         inc.add_time_point(&budget).unwrap();
@@ -178,7 +174,7 @@ fn local_schedule(agent: &Agent, policy: Policy) -> Vec<(TimePoint, Ticks)> {
     let mut out = Vec::new();
 
     for p in (1..local.time_point_count()).map(TimePoint) {
-        let t = pick(inc.lower(z, p), inc.upper(z, p), policy, &mut state);
+        let t = pick(inc.lower(z, p), inc.upper(z, p), policy, &mut rng);
         let verdict = inc.add_constraint(z, p, Some(t), Some(t), &budget).unwrap();
         assert!(
             matches!(verdict, Verdict::Consistent(_)),
