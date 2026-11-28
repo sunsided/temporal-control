@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+libfuzzer-sys = { version = "0.4.13", features = ["arbitrary-derive"] }
 temporal-control = { path = ".." }
 
 # Standalone: not a member of any workspace.
