@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/sunsided/temporal-control/compare/v0.1.1...v0.1.2) - 2026-11-28
+
+### Changed
+
+- Reuse the simulation Rng in the multi-agent tests
+- Fail the night dispatch instead of spinning when no point can run
+- Report a cycle edge without an origin as an internal error
+- Keep the existing Error discriminants
+- Move agents and summaries between processes as plain data
+- Show the algorithms in runnable examples
+- Decouple multi-agent temporal networks
+
+### Dependencies
+
+- Bump the dependency floors to the latest releases
+
 ## [0.1.1](https://github.com/sunsided/temporal-control/compare/v0.1.0...v0.1.1) - 2026-11-22
 
 ### Changed
