@@ -33,7 +33,143 @@ pub struct Agent {
     revision: u64,
 }
 
+/// The stored state of an [`Agent`], as plain data, for moving an agent between processes.
+///
+/// The ground decouples a plan and sends each agent its part; the agent's own computer
+/// rebuilds it with [`Agent::from_parts`]. Every field mirrors the accessor of the same name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentParts {
+    /// The agent's handle.
+    pub id: AgentId,
+    /// The points it owns, sorted ascending, without the reference.
+    pub points: Vec<TimePoint>,
+    /// Its local constraints, among the reference and `points`.
+    pub constraints: Vec<Constraint>,
+    /// Its proposed constraints, among the same points.
+    pub pending: Vec<Constraint>,
+    /// The shared constraints with one of its points, sorted by id.
+    pub shared: Vec<SharedConstraint>,
+    /// The cuts on its points, each of a constraint in `shared`.
+    pub cuts: Vec<Cut>,
+    /// Its revision.
+    pub revision: u64,
+}
+
 impl Agent {
+    /// Rebuilds an agent from its parts, as received from the ground or another process.
+    ///
+    /// Checks the structure, then that the local network is consistent; a negative verdict
+    /// explains the inconsistency over the constraints of [`Self::local_network`].
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnknownTimePoint`] if `points` is not sorted without duplicates or contains
+    ///   the reference, or a constraint, proposal, shared constraint or cut names a point the
+    ///   agent does not own.
+    /// - [`Error::UnknownAgent`] if a shared constraint does not involve the agent, `shared` is
+    ///   not sorted by id without duplicates, or a cut refers to a constraint not in `shared`.
+    /// - [`Error::Overflow`] if a lower bound is `i64::MIN`; otherwise any error of
+    ///   [`Stn::check_consistency`].
+    pub fn from_parts(parts: AgentParts, budget: &Budget) -> Result<Verdict<Self>, Error> {
+        let agent = Self {
+            id: parts.id,
+            points: parts.points,
+            constraints: parts.constraints,
+            pending: parts.pending,
+            shared: parts.shared,
+            cuts: parts.cuts,
+            revision: parts.revision,
+        };
+        agent.validate()?;
+
+        Ok(match agent.local_network()?.check_consistency(budget)? {
+            Verdict::Consistent(_) => Verdict::Consistent(agent),
+            Verdict::Inconsistent(cycle) => Verdict::Inconsistent(cycle),
+        })
+    }
+
+    /// The stored state as plain data; the inverse of [`Self::from_parts`].
+    #[must_use]
+    pub fn into_parts(self) -> AgentParts {
+        AgentParts {
+            id: self.id,
+            points: self.points,
+            constraints: self.constraints,
+            pending: self.pending,
+            shared: self.shared,
+            cuts: self.cuts,
+            revision: self.revision,
+        }
+    }
+
+    /// Checks the structural invariants [`Self::from_parts`] documents.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::from_parts`], without the consistency check.
+    fn validate(&self) -> Result<(), Error> {
+        let sorted_points = self.points.windows(2).all(|w| w[0] < w[1]);
+
+        if !sorted_points || self.points.first() == Some(&REFERENCE) {
+            return Err(Error::UnknownTimePoint);
+        }
+
+        for c in self.constraints.iter().chain(&self.pending) {
+            self.local_pair(c.from, c.to)?;
+
+            if c.lo.is_some_and(|l| l.checked_neg().is_none()) {
+                return Err(Error::Overflow);
+            }
+        }
+
+        self.validate_shared()?;
+
+        for cut in &self.cuts {
+            if self.local_point(cut.point).is_none_or(|tp| tp == REFERENCE) {
+                return Err(Error::UnknownTimePoint);
+            }
+
+            if self
+                .shared
+                .binary_search_by_key(&cut.shared, |s| s.id)
+                .is_err()
+            {
+                return Err(Error::UnknownAgent);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Checks that every shared constraint involves this agent at one of its own points.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::from_parts`].
+    fn validate_shared(&self) -> Result<(), Error> {
+        if !self.shared.windows(2).all(|w| w[0].id < w[1].id) {
+            return Err(Error::UnknownAgent);
+        }
+
+        for s in &self.shared {
+            let own = if s.from_agent == self.id {
+                s.constraint.from
+            } else if s.to_agent == self.id {
+                s.constraint.to
+            } else {
+                return Err(Error::UnknownAgent);
+            };
+
+            let foreign = self.local_point(own).is_none_or(|tp| tp == REFERENCE);
+
+            if s.from_agent == s.to_agent || foreign {
+                return Err(Error::UnknownTimePoint);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates the view; `points` and `shared` come sorted from the plan.
     pub(super) const fn new(
         id: AgentId,
@@ -211,6 +347,12 @@ impl Agent {
     /// kept cuts; its explanation refers to the constraints, then the proposals, then the kept
     /// cuts, on the points of [`Self::local_point`]. Without proposals it is always positive.
     ///
+    /// Pin every point that has already happened with a local constraint `z -> tp` in
+    /// `[t, t]` ([`Self::add_constraint`]) before summarising, so that no new cut contradicts
+    /// the past. Do not change the agent between sending the summary and
+    /// [`Self::redecouple`]: a change bumps [`Self::revision`], and the agent then refuses the
+    /// group.
+    ///
     /// # Errors
     ///
     /// - [`Error::UnknownAgent`] if `group` does not contain this agent.
@@ -261,7 +403,9 @@ impl Agent {
     /// adopts its proposals into its local constraints. A negative verdict means the group's
     /// plan, proposals included and with the cuts towards other agents fixed, is inconsistent;
     /// the agent then drops its proposals and keeps its cuts. Read the protocol requirement in
-    /// the [module docs](super) before using this.
+    /// the [module docs](super) before using this: if any member refuses the group, every
+    /// member must stay on (or return to) its old cuts, for example from a clone taken
+    /// before the call.
     ///
     /// # Errors
     ///

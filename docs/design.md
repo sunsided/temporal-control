@@ -225,8 +225,8 @@ infinite side is replaced by the other, and `0` is used if both are infinite. An
 `[L(v) - w, U(u)]` keeps the network consistent (proof in the module docs), and both
 operands lie in that interval. If the edge still has slack, the midpoint splits it evenly;
 if the windows already imply it, the midpoint tightens neither window. The choice is a
-greedy heuristic: it does not maximise the total flexibility (an optimal decoupling needs a
-linear program), and the order of the shared constraints matters.
+greedy heuristic: it does not maximise the total flexibility (an optimal decoupling can be
+posed as a linear program), and the order of the shared constraints matters.
 
 **Summaries.** For a group `G` of agents, agent `a` summarises its local network, plus its
 proposals, with the cuts of shared constraints towards members of `G` removed: the minimal
@@ -247,7 +247,11 @@ the new ones; cuts towards non-members stay, and they are part of every member's
 On a positive verdict proposals become local constraints; on a negative one they are
 dropped and the cuts stay. The result stays a decoupling only if all members switch: the
 protocol must ensure every member holds the full set of summaries before any member applies
-them. A summary carries the agent's revision, and an agent refuses a group whose summary of
+them, that no member changes between sending its summary and adopting, and that a single
+refusal returns every member to its old cuts. Points that already happened are pinned as
+local constraints (`z -> t` in `[t, t]`) before summarising, so new cuts respect the past.
+Agents and summaries cross process boundaries as plain data (`AgentParts`,
+`Summary::from_parts`, both validated); the wire format is left to the integrator. A summary carries the agent's revision, and an agent refuses a group whose summary of
 it is older than its current state.
 
 **Communication windows.** A communication opportunity whose time is uncertain is a
@@ -506,7 +510,7 @@ harness in one process.
 - A deterministic simulator with injected durations, resets and overruns.
 - Adapters: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
 - Multi-agent: an optimal (flexibility-maximising) decoupling, decoupling of STNUs with
-  contingent links across agents, a wire encoding for summaries, the acknowledgement round
+  contingent links across agents, a wire encoding for agents and summaries, the acknowledgement round
   that makes re-decoupling all-or-none, and a fuzz target for the group operations.
 
 ## 10. Cross-crate needs

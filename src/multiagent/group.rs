@@ -46,6 +46,62 @@ impl Summary {
         }
     }
 
+    /// Rebuilds a summary received from another agent, as plain data.
+    ///
+    /// The fields mirror the accessors of the same names. [`AgentGroup::new`] checks that the
+    /// summaries of a group fit each other.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::MismatchedSummaries`] if `group` is not sorted without duplicates or lacks
+    /// `agent`; `points` is not sorted without duplicates or contains the reference; a bound
+    /// names a point other than the reference and `points`; or `shared` is not sorted by id
+    /// without duplicates, or one of them does not join `agent`, at one of `points`, to
+    /// another member of `group`.
+    pub fn from_parts(
+        agent: AgentId,
+        group: Vec<AgentId>,
+        revision: u64,
+        points: Vec<TimePoint>,
+        bounds: Vec<Constraint>,
+        shared: Vec<SharedConstraint>,
+    ) -> Result<Self, Error> {
+        let summary = Self::new(agent, group, revision, points, bounds, shared);
+
+        if summary.is_well_formed() {
+            Ok(summary)
+        } else {
+            Err(Error::MismatchedSummaries)
+        }
+    }
+
+    /// Whether the structure [`Self::from_parts`] documents holds.
+    fn is_well_formed(&self) -> bool {
+        let known = |tp: TimePoint| tp == REFERENCE || self.points.binary_search(&tp).is_ok();
+        let member = |a: AgentId| self.group.binary_search(&a).is_ok();
+        let joins_member = |s: &SharedConstraint| {
+            let own = if s.from_agent == self.agent {
+                s.constraint.from
+            } else {
+                s.constraint.to
+            };
+
+            s.peer(self.agent)
+                .is_some_and(|p| p != self.agent && member(p))
+                && own != REFERENCE
+                && known(own)
+        };
+
+        let group_ok = self.group.windows(2).all(|w| w[0] < w[1]) && member(self.agent);
+        let points_ok =
+            self.points.windows(2).all(|w| w[0] < w[1]) && self.points.first() != Some(&REFERENCE);
+        let bounds_ok = self.bounds.iter().all(|b| known(b.from) && known(b.to));
+        let shared_ok = self.shared.windows(2).all(|w| w[0].id < w[1].id)
+            && self.shared.iter().all(joins_member);
+
+        group_ok && points_ok && bounds_ok && shared_ok
+    }
+
     /// The agent that made the summary.
     #[must_use]
     pub const fn agent(&self) -> AgentId {

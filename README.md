@@ -98,7 +98,7 @@ Each example asserts its own results and runs as a test (`cargo test --examples`
 
 - [`rover_relay`](https://github.com/sunsided/temporal-control/blob/main/examples/rover_relay.rs):
   two rovers and an orbiter decouple a joint plan, execute it without talking, absorb a delay
-  locally, rebalance the slack in a relay pass when a delay does not fit, and reject a
+  locally, rebalance the slack at the next contact when a delay does not fit, and reject a
   conflicting change with the shared constraint it breaks.
 - [`relay_pass`](https://github.com/sunsided/temporal-control/blob/main/examples/relay_pass.rs):
   a lander downlinks through a relay pass whose opening is uncertain. Dynamic

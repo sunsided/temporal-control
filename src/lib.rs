@@ -76,8 +76,8 @@ pub use dispatch::{
 pub use error::Error;
 #[cfg(feature = "alloc")]
 pub use multiagent::{
-    Agent, AgentGroup, AgentId, Cut, GroupConflict, GroupVerdict, MultiAgentStn, SharedConstraint,
-    Summary,
+    Agent, AgentGroup, AgentId, AgentParts, Cut, GroupConflict, GroupVerdict, MultiAgentStn,
+    SharedConstraint, Summary,
 };
 #[cfg(feature = "alloc")]
 pub use stn::{

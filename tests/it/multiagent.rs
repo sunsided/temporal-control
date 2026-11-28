@@ -524,3 +524,117 @@ fn conflicting_proposal_dropped() {
     assert_eq!(agents[0].pending(), &[]);
     assert_eq!(agents[0].cuts(), cuts.as_slice());
 }
+
+/// Rebuilds a summary from its accessors.
+fn rebuild(s: &Summary) -> Result<Summary, temporal_control::Error> {
+    Summary::from_parts(
+        s.agent(),
+        s.group().to_vec(),
+        s.revision(),
+        s.points().to_vec(),
+        s.bounds().to_vec(),
+        s.shared_constraints().to_vec(),
+    )
+}
+
+proptest! {
+    /// Agents and summaries survive a round trip through their plain parts.
+    #[test]
+    fn parts_round_trip(spec in plan(true, 1..=3)) {
+        let members: Vec<usize> = (0..spec.agents).collect();
+        let mut agents = decouple(&spec.build(&[]));
+        let summaries = propose_and_summarise(&spec, &mut agents, &members);
+
+        for agent in &agents {
+            let rebuilt = Agent::from_parts(agent.clone().into_parts(), &Budget::UNLIMITED).unwrap();
+            prop_assert_eq!(rebuilt, Verdict::Consistent(agent.clone()));
+        }
+
+        for s in summaries.iter().flatten() {
+            prop_assert_eq!(&rebuild(s).unwrap(), s);
+        }
+    }
+}
+
+/// Malformed parts are refused, and an inconsistent local network is explained.
+#[test]
+fn malformed_parts_refused() {
+    use temporal_control::Error;
+
+    let mut plan = MultiAgentStn::new(2);
+    let z = plan.reference();
+    let a = plan.add_time_point(AgentId(0)).unwrap();
+    let b = plan.add_time_point(AgentId(1)).unwrap();
+    plan.add_constraint(z, a, Some(Ticks(0)), Some(Ticks(10)))
+        .unwrap();
+    plan.add_constraint(a, b, Some(Ticks(1)), Some(Ticks(5)))
+        .unwrap();
+    let agents = decouple(&plan);
+    let parts = agents[0].clone().into_parts();
+    let rebuild_agent = |parts| Agent::from_parts(parts, &Budget::UNLIMITED);
+
+    let mut unsorted = parts.clone();
+    unsorted.points.insert(0, b);
+    let mut stranger = parts.clone();
+    stranger.id = AgentId(5);
+    stranger.points = vec![b];
+    stranger.constraints.clear();
+    stranger.cuts.clear();
+    let mut bad_cut = parts.clone();
+    bad_cut.shared.clear();
+    let mut contradiction = parts.clone();
+    contradiction.constraints.push(Constraint {
+        from: z,
+        to: a,
+        lo: Some(Ticks(11)),
+        hi: None,
+    });
+
+    assert_eq!(
+        rebuild_agent(parts.clone()).unwrap(),
+        Verdict::Consistent(agents[0].clone())
+    );
+    assert!(matches!(
+        rebuild_agent(unsorted),
+        Err(Error::UnknownTimePoint)
+    ));
+    assert!(matches!(rebuild_agent(stranger), Err(Error::UnknownAgent)));
+    assert!(matches!(rebuild_agent(bad_cut), Err(Error::UnknownAgent)));
+    assert!(matches!(
+        rebuild_agent(contradiction),
+        Ok(Verdict::Inconsistent(_))
+    ));
+}
+
+/// Malformed summary parts are refused.
+#[test]
+fn malformed_summary_parts_refused() {
+    use temporal_control::Error;
+
+    let mut plan = MultiAgentStn::new(2);
+    let z = plan.reference();
+    let a = plan.add_time_point(AgentId(0)).unwrap();
+    let b = plan.add_time_point(AgentId(1)).unwrap();
+    plan.add_constraint(a, b, Some(Ticks(1)), Some(Ticks(5)))
+        .unwrap();
+    let s = summaries(&decouple(&plan)).remove(0);
+    let missing_member = Summary::from_parts(
+        s.agent(),
+        vec![s.agent()],
+        s.revision(),
+        s.points().to_vec(),
+        s.bounds().to_vec(),
+        s.shared_constraints().to_vec(),
+    );
+    let reference_point = Summary::from_parts(
+        s.agent(),
+        s.group().to_vec(),
+        s.revision(),
+        vec![z],
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(rebuild(&s).as_ref(), Ok(&s));
+    assert_eq!(missing_member, Err(Error::MismatchedSummaries));
+    assert_eq!(reference_point, Err(Error::MismatchedSummaries));
+}

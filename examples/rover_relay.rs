@@ -1,17 +1,18 @@
 //! Two rovers and an orbiter share one plan but rarely talk to each other.
 //!
 //! Rover A drives and drills, rover B images the drill site while the dust settles, and both
-//! hand their data to an orbiter during its relay pass. The ground decouples the plan once;
-//! each vehicle then executes, and absorbs small changes, without asking anybody. A change
-//! beyond its decoupled window waits for the next communication window, where the vehicles
-//! exchange summaries, check the change together and redistribute the slack, still without a
-//! central solver.
+//! hand their data to an orbiter during its relay pass. The ground decouples the plan once and
+//! uplinks each vehicle its part; each vehicle then executes, and absorbs small changes,
+//! without asking anybody. A change beyond its decoupled window waits for the next contact
+//! between the vehicles (here a short UHF contact before the sol starts), where they exchange
+//! summaries, check the change together and redistribute the slack, still without a central
+//! solver.
 //!
 //! Run with `cargo run --example rover_relay`. Times are minutes after the start of the sol.
 
 use temporal_control::{
-    Agent, AgentGroup, AgentId, Budget, GroupVerdict, MultiAgentStn, Stn, Summary, Ticks,
-    TimePoint, Verdict,
+    Agent, AgentGroup, AgentId, AgentParts, Budget, GroupVerdict, MultiAgentStn, Stn, Summary,
+    Ticks, TimePoint, Verdict,
 };
 
 /// Rover A: drives, drills, sends its sample data.
@@ -43,21 +44,24 @@ fn main() {
     let budget = Budget::UNLIMITED;
     let (plan, p) = build_plan();
 
-    let Verdict::Consistent(mut agents) = plan.decouple(&budget).expect("small plan") else {
+    let Verdict::Consistent(decoupled) = plan.decouple(&budget).expect("small plan") else {
         panic!("the plan is consistent");
     };
+    let mut agents = uplink(decoupled);
 
     println!("Decoupled windows (minutes after sol start):");
     print_windows(&agents, &p);
     report_flexibility(&plan, &agents);
 
-    println!("\nEach vehicle executes alone: rover A as early as it can, the others late.");
+    println!("\nIf each vehicle executed alone: rover A as early as it can, the others late.");
     execute_independently(&plan, &agents);
 
-    println!("\nRover A runs late.");
+    println!("\nBefore the sol starts, rover A's arm check delays drilling.");
     absorb_locally(&mut agents[ROVER_A.0], &p);
 
-    println!("\nRelay pass: the vehicles exchange summaries.");
+    println!(
+        "\nContact before the sol starts (nothing has executed): the vehicles exchange summaries."
+    );
     redecouple_with_proposal(&mut agents, &p);
     print_windows(&agents, &p);
 
@@ -73,6 +77,23 @@ fn main() {
 
     println!("\nRover B proposes imaging before the drill can be done.");
     reject_conflicting_proposal(&mut agents, &p);
+}
+
+/// Sends every vehicle its part as plain data and rebuilds it there.
+///
+/// The fields of [`AgentParts`] are what a wire format would carry; the vehicle validates
+/// them and checks its local network on arrival.
+fn uplink(agents: Vec<Agent>) -> Vec<Agent> {
+    agents
+        .into_iter()
+        .map(|agent| {
+            let parts: AgentParts = agent.into_parts();
+            match Agent::from_parts(parts, &Budget::UNLIMITED).expect("well formed") {
+                Verdict::Consistent(agent) => agent,
+                Verdict::Inconsistent(_) => panic!("a decoupled part is consistent"),
+            }
+        })
+        .collect()
 }
 
 /// Builds the joint plan of all three vehicles.
@@ -228,7 +249,7 @@ fn absorb_locally(rover: &mut Agent, p: &Points) {
     rover
         .propose(z, p.drill_start, Some(Ticks(80)), None)
         .expect("own point");
-    println!("  proposed for the next relay pass");
+    println!("  proposed for the next contact");
 }
 
 /// Describes a local verdict.

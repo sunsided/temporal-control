@@ -21,8 +21,8 @@
 //! `max(lower(u), lower(v) - w)` and `min(upper(u), upper(v) - w)`, so the slack the edge
 //! still has is split evenly between both sides. Each choice keeps the network consistent, so
 //! decoupling succeeds whenever the plan is consistent. It is a heuristic: it does not
-//! maximise the total flexibility left to the agents (an optimal decoupling needs a linear
-//! program).
+//! maximise the total flexibility left to the agents (an optimal decoupling can be posed as
+//! a linear program).
 //!
 //! # Distributed checking and re-decoupling
 //!
@@ -58,8 +58,15 @@
 //! **Protocol requirement.** Re-decoupling is safe only if every member of the group adopts
 //! its new cuts, and none keeps the old ones. Exchange the summaries, make sure every member
 //! holds the full set (for example with an acknowledgement round), and only then call
-//! [`Agent::redecouple`] on each member. A member that missed the exchange keeps its old cuts,
-//! and then every other member must keep theirs too.
+//! [`Agent::redecouple`] on each member. No member may change between sending its summary and
+//! adopting (it would refuse the group as stale). If any member misses the exchange or
+//! refuses the group, every member stays on, or returns to, its old cuts; keep a clone of each
+//! agent until all have adopted. Points that already happened must be pinned as local
+//! constraints before summarising.
+//!
+//! Agents and summaries move between processes as plain data: [`AgentParts`] with
+//! [`Agent::from_parts`], and [`Summary::from_parts`]. The wire format is the
+//! integrator's.
 //!
 //! # Communication windows
 //!
@@ -97,7 +104,7 @@ mod group;
 
 use alloc::vec::Vec;
 
-pub use agent::Agent;
+pub use agent::{Agent, AgentParts};
 pub use group::{AgentGroup, GroupConflict, GroupVerdict, Summary};
 
 use crate::stn::{Bound, Constraint, ConstraintId, Stn, Verdict};
