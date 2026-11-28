@@ -197,6 +197,63 @@ loading fails with `DispatchError::IndexTypeTooSmall`. Measured per point and pe
 24 with `usize`. The saving on 32-bit targets is small because windows and entries hold
 8-byte-aligned `i64` ticks.
 
+### 3.4 Multi-agent STNs
+
+A multi-agent STN is an STN with a reference point `z` and an owner `own(t)` in a set of
+agents for every other point. A constraint is *local* to agent `a` if each endpoint is `z`
+or owned by `a`, and *shared* if its endpoints have different owners.
+
+A *decoupling* adds unary constraints (*cuts*) `t - z >= c` or `t - z <= c` on points of
+shared constraints, each given to the owner of its point, such that
+
+1. for every shared distance-graph edge `u -> v` with weight `w`, the owner of `u` has a cut
+   `t_u - z >= c` and the owner of `v` a cut `t_v - z <= c + w` (so every schedule of both
+   sides satisfies `t_v - t_u <= w`), and
+2. the plan with all cuts added is consistent.
+
+Then every agent's *local network* (its local constraints and its cuts) is consistent, and
+any family of schedules, one per local network, with `z = 0` in each, combines into a
+schedule of the whole plan: local constraints hold by construction and shared ones by (1).
+This is Hunsberger's temporal decoupling problem (AAAI 2002). Cuts are kept for every shared
+edge, even where the windows of the joint minimal network already imply it: those windows
+may owe their tightness to other agents' constraints, which the local network does not see.
+
+**Choice of the cuts** (`multiagent/cuts.rs`). Shared edges are processed in constraint order
+on an `IncrementalStn` of the plan. With the current windows `[L(x), U(x)]` relative to `z`,
+`c` is the midpoint (rounded down) of `max(L(u), L(v) - w)` and `min(U(u), U(v) - w)`; an
+infinite side is replaced by the other, and `0` is used if both are infinite. Any `c` in
+`[L(v) - w, U(u)]` keeps the network consistent (proof in the module docs), and both
+operands lie in that interval. If the edge still has slack, the midpoint splits it evenly;
+if the windows already imply it, the midpoint tightens neither window. The choice is a
+greedy heuristic: it does not maximise the total flexibility (an optimal decoupling needs a
+linear program), and the order of the shared constraints matters.
+
+**Summaries.** For a group `G` of agents, agent `a` summarises its local network, plus its
+proposals, with the cuts of shared constraints towards members of `G` removed: the minimal
+bounds between every pair of `z` and the points of `a`'s shared constraints with members.
+Because a consistent STN's minimal network is decomposable, these bounds describe exactly
+the projections of `a`'s feasible schedules onto those points. So the *joint network* of a
+group (all summaries plus the members' shared constraints) is consistent iff the members'
+networks plus their shared constraints are, and it has the same minimal bounds on the
+shared points. With every agent in the group, that is the consistency of the plan with
+every proposal, and the cuts computed on the joint network equal those of a central
+decoupling. A negative verdict names the shared constraints and the agents whose summaries
+are on the negative cycle, not their own constraints, which the summaries do not carry.
+
+**Re-decoupling.** Every member builds the same joint network from the same summaries (they
+are sorted by agent, so the order of arrival does not matter), computes the cuts of the
+group's shared constraints on it, and replaces its own cuts towards members with its side of
+the new ones; cuts towards non-members stay, and they are part of every member's summary.
+On a positive verdict proposals become local constraints; on a negative one they are
+dropped and the cuts stay. The result stays a decoupling only if all members switch: the
+protocol must ensure every member holds the full set of summaries before any member applies
+them. A summary carries the agent's revision, and an agent refuses a group whose summary of
+it is older than its current state.
+
+**Communication windows.** A communication opportunity whose time is uncertain is a
+contingent link in an STNU (it opens `lo..hi` after its activation and is observed when it
+happens). Dynamic controllability then covers every opening time; no new rules are needed.
+
 ## 4. Algorithm choices
 
 | Problem | Algorithm | Cost | Status |
@@ -214,6 +271,9 @@ loading fails with `DispatchError::IndexTypeTooSmall`. Measured per point and pe
 | STNU DC check, cross-check | per-label backpropagation: Morris-style, one propagation per kind of negative in-edge, no normalisation | `O(n (k + 1) (m + n^2) log n)` | done |
 | Non-DC explanation | semi-reducible negative cycle collected while Morris's nested propagations unwind, in compact form (each derived edge once, lazily expandable) | `O(n^3)` compact; expansion up to `3 * 2^k - 2` edges | done |
 | Dispatchable STN | minimal network + dominated-edge filtering (MMT 1998) | `O(n^3)` | done |
+| Temporal decoupling | greedy midpoint cuts per shared edge on an incremental minimal network (section 3.4) | `O(n^3 + (m + s) n^2)` for `s` shared constraints, `n^2` cells | done |
+| Distributed consistency check | per-agent minimal-network summaries on the shared points (Floyd-Warshall), then Bellman-Ford on the joint network | `O(n_a^3)` per agent `a`, `O(p b)` for the joint network of `p` points and `b` bounds | done |
+| Re-decoupling | the decoupling, run by every member on the joint network | as decoupling, on the joint network | done |
 
 Two independent algorithms per question are a deliberate choice: they cross-check each other
 in tests and, on the ground, at runtime. `Stn::minimal_network` already does this: if
@@ -247,6 +307,7 @@ graph LR
 | STN, STNU, DC checking, explanations, dispatchable generation | `alloc` (default feature) | ground side; may also run onboard on a capable processor |
 | Compact dispatchable encoding (decoder, validator, `encode_into`), dispatcher | none | const-generic capacity, in-place loading from a `const EMPTY`; `O(degree)` work per event |
 | `DispatchableNetwork::encode` / `decode` | `alloc` | ground side; `decode` runs exactly the onboard checks |
+| Multi-agent decoupling, summaries, group checks | `alloc` | ground side, or on an agent's own processor; each agent dispatches its local network with the dispatcher |
 
 The onboard side works without `alloc`: `Dispatcher::load_encoded` validates a received
 encoding (framing, length, CRC-32, canonical form, indices, bounds, structural invariants such
@@ -382,6 +443,7 @@ Total length `24 + 21 n + 16 (e + w)`, which must match the buffer exactly. Desi
 | Encoding | Round trips of dispatchable STNs and ESTNUs (decode equals the original, re-encoding is byte-identical, simulated dispatch from decoded `usize` and `u16` dispatchers matches the original run); every single-bit flip and every truncation of a sample encoding is rejected and leaves a busy dispatcher unchanged; each `DecodeError`; random bytes and random records behind a valid header and CRC never panic | done |
 | Fuzzing | Standalone `fuzz/` crate (not a workspace member): `decode` (raw bytes and framed random records; onboard and ground decoders agree), `dispatch` (arbitrary networks and call sequences, `usize` and `u16` dispatchers agree, rejected loads change nothing), `dc_checkers` (STNUs up to 8 points: all checkers and the closure agree, DC networks load and round-trip), `stn` (STNs up to 8 points with extreme bounds: Bellman-Ford schedules hold, Floyd-Warshall, P³C and the dispatchable filter agree with Bellman-Ford, P³C bounds equal the minimal network's, the incremental STN accepts exactly the consistent constraints and matches the minimal network after every step). Run with `cargo +nightly fuzz run <target> -- -max_total_time=60` or `task fuzz:smoke`; 60 s each found nothing. CI builds and lints the targets | done; fuzzing runs in CI open |
 | Model checking | Kani harnesses for the dispatcher calls and the decoder on small fixed capacities: no panic, no overflow, windows respected | done: 11 harnesses verified under Kani 0.68, each under 12 GB (bounds and results below); also run on concrete inputs in unit tests |
+| Multi-agent | Schedules picked by each agent alone (earliest, latest, random) from its local network combine into a schedule of the plan; decoupling succeeds exactly on consistent plans; the group check with all agents equals the central check of the plan with the proposals; re-decoupling with all agents equals the central decoupling, agent by agent; after a re-decoupling of two of three agents the third is unchanged and independent schedules still combine; mismatched, incomplete or stale summaries are refused. Mutations (run by hand) must make it fail: skipping the cuts of already implied edges, and cuts outside the feasible interval | done; fuzzing open |
 | Simulation | deterministic replay with injected contingent durations and resets: DC network plus dispatcher never violates a requirement constraint | open |
 
 **Kani harnesses.** `src/dispatch/proofs.rs` holds bounded no-panic checks as ordinary
@@ -443,6 +505,9 @@ harness in one process.
   CI.
 - A deterministic simulator with injected durations, resets and overruns.
 - Adapters: F Prime (WebAssembly sequencing) and cFS demonstrators, in separate crates.
+- Multi-agent: an optimal (flexibility-maximising) decoupling, decoupling of STNUs with
+  contingent links across agents, a wire encoding for summaries, the acknowledgement round
+  that makes re-decoupling all-or-none, and a fuzz target for the group operations.
 
 ## 10. Cross-crate needs
 
@@ -482,6 +547,10 @@ harness in one process.
   built-in policies (as late as possible, preferred times) or leaves that to the executive via
   `can_execute`/`execute`.
 - Whether onboard incremental re-checking is required, and its budget.
+- Multi-agent decoupling: which flexibility measure missions care about (sum of window
+  widths, the narrowest window, or the windows of chosen points), and whether that justifies
+  an LP-based optimal decoupling instead of the greedy midpoint. Default: greedy midpoint, in
+  constraint order.
 - Whether contingent links with `l = 0` must be supported. Morris 2014 allows `0 <= l < u`
   (its normal form has `l = 0`); MMV 2001 and Hunsberger 2009 require `0 < l < u`. Default:
   reject `l = 0`, accept `l = u` (see section 12).
@@ -652,3 +721,11 @@ read:
   1193-1198 (labelled distance graph; restated in Morris 2014).
 - L. Hunsberger. Magic loops in simple temporal networks with uncertainty. ICAART 2013 (2),
   157-170.
+
+Cited as background for section 3.4, content not read and not compared with the code:
+
+- L. Hunsberger. Algorithms for a temporal decoupling problem in multi-agent planning. AAAI
+  2002, 468-475 (the temporal decoupling problem; the cut rule of section 3.4 is this
+  crate's own).
+- J. C. Boerkoel Jr. and E. H. Durfee. Distributed reasoning for multiagent simple temporal
+  problems. JAIR 47 (2013) 95-156 (agent-local subnetworks with shared points).

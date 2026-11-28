@@ -82,4 +82,13 @@ impl Meter {
 
         Ok(())
     }
+
+    /// Steps still available.
+    #[cfg_attr(
+        not(feature = "alloc"),
+        expect(dead_code, reason = "used by alloc algorithms")
+    )]
+    pub(crate) const fn remaining(&self) -> u64 {
+        self.remaining
+    }
 }

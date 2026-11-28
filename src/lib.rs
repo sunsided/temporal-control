@@ -13,6 +13,10 @@
 //!   [`Stnu::check_controllability`], Morris's `O(n^3)` algorithm; and the others in
 //!   [`DcAlgorithm`]). A negative verdict carries a [`SemiReducibleCycle`] naming the
 //!   requirements and contingent extremes that conflict.
+//! - Multi-agent STNs ([`MultiAgentStn`]): temporal decoupling into one [`Agent`] per agent
+//!   that dispatches alone, consistency checks and re-decoupling from exchanged [`Summary`]s
+//!   without a central solver, and communication windows as contingent links (see
+//!   [`multiagent`]).
 //! - An onboard [`Dispatcher`] with fixed capacity that needs no `alloc`, loads in place from
 //!   a `const` [`Dispatcher::EMPTY`], and stores handles in a chosen [`Index`] type.
 //! - A compact, versioned, CRC-32-checked encoding of dispatchable networks
@@ -55,6 +59,8 @@ mod budget;
 pub mod dispatch;
 mod error;
 #[cfg(feature = "alloc")]
+pub mod multiagent;
+#[cfg(feature = "alloc")]
 pub mod stn;
 #[cfg(feature = "alloc")]
 pub mod stnu;
@@ -68,6 +74,11 @@ pub use dispatch::{
     DecodeError, DispatchEdge, DispatchError, Dispatcher, EncodeError, Index, PointKind, Wait,
 };
 pub use error::Error;
+#[cfg(feature = "alloc")]
+pub use multiagent::{
+    Agent, AgentGroup, AgentId, Cut, GroupConflict, GroupVerdict, MultiAgentStn, SharedConstraint,
+    Summary,
+};
 #[cfg(feature = "alloc")]
 pub use stn::{
     Bound, ChordalNetwork, Constraint, ConstraintId, CycleEdge, IncrementalStn, MinimalNetwork,

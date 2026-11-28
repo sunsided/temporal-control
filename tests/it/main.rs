@@ -5,6 +5,7 @@ mod encoding;
 mod examples;
 mod generators;
 mod incremental;
+mod multiagent;
 mod oracle;
 mod papers;
 mod properties;
