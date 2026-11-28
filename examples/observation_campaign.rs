@@ -231,11 +231,19 @@ fn dispatch_night(night: &Stn) {
     let mut out = [TimePoint(0); 7];
     let mut t = 0;
 
-    while !dispatcher.is_complete() {
+    loop {
         dispatcher
             .step(Ticks(t), &[], &mut out)
             .expect("dispatchable");
-        t = dispatcher.next_wakeup().map_or(t, |w| w.0.max(t + 1));
+
+        if dispatcher.is_complete() {
+            break;
+        }
+
+        let wakeup = dispatcher
+            .next_wakeup()
+            .expect("an unexecuted point can still run");
+        t = wakeup.0.max(t + 1);
     }
 
     let times: Vec<i64> = (0..n)
