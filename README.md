@@ -92,6 +92,27 @@ Next-tick reaction is supported by transforming the network (`Stnu::with_reactio
 Not yet implemented: differential tests against CSTNU-Tool, and optimal (flexibility-maximising)
 decoupling.
 
+## Examples
+
+Each example asserts its own results and runs as a test (`cargo test --examples`).
+
+- [`rover_relay`](https://github.com/sunsided/temporal-control/blob/main/examples/rover_relay.rs):
+  two rovers and an orbiter decouple a joint plan, execute it without talking, absorb a delay
+  locally, rebalance the slack in a relay pass when a delay does not fit, and reject a
+  conflicting change with the shared constraint it breaks.
+- [`relay_pass`](https://github.com/sunsided/temporal-control/blob/main/examples/relay_pass.rs):
+  a lander downlinks through a relay pass whose opening is uncertain. Dynamic
+  controllability, the explanation of a deadline that cannot hold, the checksummed uplink and
+  the heap-free dispatcher reacting to the actual analysis end and pass opening.
+- [`observation_campaign`](https://github.com/sunsided/temporal-control/blob/main/examples/observation_campaign.rs):
+  a telescope night planned request by request with the incremental STN (a rejected request
+  names the constraints it conflicts with), a 200-field survey checked with P³C instead of
+  the full matrix, and the dispatchable network of the night.
+
+```sh
+cargo run --example rover_relay
+```
+
 ## Cargo features
 
 | Feature | Default | Enables |

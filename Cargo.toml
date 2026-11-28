@@ -37,6 +37,22 @@ alloc = []
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 proptest = { version = "1.12", default-features = false, features = ["std"] }
 
+# Examples also run as tests (`test = true`), so their assertions are checked in CI.
+[[example]]
+name = "rover_relay"
+required-features = ["alloc"]
+test = true
+
+[[example]]
+name = "relay_pass"
+required-features = ["alloc"]
+test = true
+
+[[example]]
+name = "observation_campaign"
+required-features = ["alloc"]
+test = true
+
 [[bench]]
 name = "dispatch"
 harness = false
